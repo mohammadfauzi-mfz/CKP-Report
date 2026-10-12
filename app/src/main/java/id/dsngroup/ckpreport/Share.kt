@@ -7,9 +7,13 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 object Share {
-    fun teks(r: Report) = Laporan.pesan(
-        r.est, r.afd, r.blok, r.problem, r.lat, r.lon, r.fotoUrl, r.pelapor, r.waktuText,
-    )
+    fun teks(ctx: Context, r: Report): String {
+        val url = ctx.getSharedPreferences("ckp", Context.MODE_PRIVATE).getString("url", "") ?: ""
+        return Laporan.pesan(
+            r.est, r.afd, r.blok, r.problem, r.lat, r.lon, r.fotoUrl, r.pelapor, r.waktuText,
+            Laporan.petaUrl(url, r.lat, r.lon),
+        )
+    }
 
     /** Bagikan foto + teks ke WhatsApp. Tetap bisa dipakai walau belum terupload (tanpa link foto Drive). */
     fun whatsApp(ctx: Context, r: Report) {
@@ -25,7 +29,7 @@ object Share {
             } else {
                 i.type = "text/plain"
             }
-            i.putExtra(Intent.EXTRA_TEXT, teks(r))
+            i.putExtra(Intent.EXTRA_TEXT, teks(ctx, r))
             if (pkg != null) i.setPackage(pkg)
             return i
         }

@@ -1,6 +1,10 @@
 package id.dsngroup.ckpreport
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
@@ -48,5 +52,80 @@ object ImageUtil {
         } catch (e: OutOfMemoryError) {
             false
         }
+    }
+
+    const val MAX_PHOTOS = 6
+
+    /** Gambar kecil untuk pratinjau. */
+    fun thumb(f: File, size: Int = 200): Bitmap? = try {
+        val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, b)
+        var sample = 1
+        while (max(b.outWidth, b.outHeight) / (sample * 2) >= size) sample *= 2
+        BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })
+    } catch (e: Exception) {
+        null
+    }
+
+    /**
+     * 1 foto -> disalin apa adanya. 2+ foto -> dijadikan kolase (maks. 6):
+     * 2: berdampingan, 3: 1 besar di atas + 2, 4: 2x2, 5: 2 + 3, 6: 3 + 3.
+     */
+    fun collage(srcs: List<File>, out: File, width: Int = 1280): Boolean {
+        if (srcs.isEmpty()) return false
+        return try {
+            if (srcs.size == 1) {
+                srcs[0].copyTo(out, overwrite = true)
+                return true
+            }
+            val list = srcs.take(MAX_PHOTOS)
+            val layout = when (list.size) {
+                2 -> listOf(2)
+                3 -> listOf(1, 2)
+                4 -> listOf(2, 2)
+                5 -> listOf(2, 3)
+                else -> listOf(3, 3)
+            }
+            val rowH = if (layout.max() == 3) 480 else 640
+            val gap = 6
+            val bmp = Bitmap.createBitmap(width, rowH * layout.size + gap * (layout.size - 1), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            canvas.drawColor(Color.WHITE)
+            val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+            var idx = 0
+            for ((r, cols) in layout.withIndex()) {
+                val cellW = (width - gap * (cols - 1)) / cols
+                for (c in 0 until cols) {
+                    val left = c * (cellW + gap)
+                    val top = r * (rowH + gap)
+                    drawCover(canvas, list[idx++], Rect(left, top, left + cellW, top + rowH), paint)
+                }
+            }
+            FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            bmp.recycle()
+            true
+        } catch (e: Exception) {
+            false
+        } catch (e: OutOfMemoryError) {
+            false
+        }
+    }
+
+    /** Gambar foto memenuhi kotak tujuan (dipotong di tengah, tanpa distorsi). */
+    private fun drawCover(canvas: Canvas, f: File, dst: Rect, paint: Paint) {
+        val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(f.path, b)
+        if (b.outWidth <= 0 || b.outHeight <= 0) return
+        var sample = 1
+        while (b.outWidth / (sample * 2) >= dst.width() && b.outHeight / (sample * 2) >= dst.height()) sample *= 2
+        val bmp = BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return
+        val scale = max(dst.width().toFloat() / bmp.width, dst.height().toFloat() / bmp.height)
+        val sw = dst.width() / scale
+        val sh = dst.height() / scale
+        val sl = (bmp.width - sw) / 2f
+        val st = (bmp.height - sh) / 2f
+        val src = Rect(sl.toInt(), st.toInt(), (sl + sw).toInt().coerceAtMost(bmp.width), (st + sh).toInt().coerceAtMost(bmp.height))
+        canvas.drawBitmap(bmp, src, dst, paint)
+        bmp.recycle()
     }
 }

@@ -13,13 +13,20 @@ object Laporan {
     fun mapsUrl(lat: Double, lon: Double) =
         "https://www.google.com/maps/search/?api=1&query=${koordinat(lat)},${koordinat(lon)}"
 
+    /** Halaman penghubung (di Apps Script Anda) untuk membuka koordinat di CarryMap / aplikasi peta lain. */
+    fun petaUrl(scriptUrl: String, lat: Double, lon: Double): String {
+        if (!scriptUrl.startsWith("https://script.google.com/")) return ""
+        return scriptUrl.substringBefore('?') + "?lat=${koordinat(lat)}&lon=${koordinat(lon)}"
+    }
+
     /** Teks untuk dibagikan ke grup WhatsApp (format koordinat mengikuti contoh chat). */
     fun pesan(
         estate: String, afdeling: String, blok: String, problem: String,
         lat: Double, lon: Double, fotoUrl: String, pelapor: String, waktu: String,
+        petaUrl: String = "",
     ): String {
         val sb = StringBuilder()
-        sb.append("🔥 *CKP SPOT REPORT* 🔥\n")
+        sb.append("⚠️ *CKP SPOT REPORT* ⚠️\n")
         sb.append("PT. Bima Palma Nugraha\n\n")
         sb.append("Waktu : $waktu\n")
         if (pelapor.isNotBlank()) sb.append("Pelapor : $pelapor\n")
@@ -31,6 +38,7 @@ object Laporan {
         sb.append("Latitude : ${koordinat(lat)};\n")
         sb.append("Longitude : ${koordinat(lon)};\n")
         sb.append("Google Maps :\n${mapsUrl(lat, lon)}")
+        if (petaUrl.isNotBlank()) sb.append("\n\nCarryMap / aplikasi peta lain :\n$petaUrl")
         if (fotoUrl.isNotBlank()) sb.append("\n\nFoto : $fotoUrl")
         return sb.toString()
     }

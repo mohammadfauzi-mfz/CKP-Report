@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.graphics.Typeface
 import android.os.Bundle
 import android.provider.Settings
@@ -16,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -45,24 +45,30 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etBlok: TextInputEditText
     private lateinit var etProblem: TextInputEditText
     private lateinit var tvGps: TextView
-    private lateinit var ivFoto: ImageView
+    private lateinit var thumbs: LinearLayout
+    private lateinit var tvFotoInfo: TextView
     private lateinit var btnUpload: MaterialButton
     private lateinit var progress: ProgressBar
     private lateinit var loc: LocationHelper
-    private var photoReady = false
+    private val photos = mutableListOf<File>()
     private lateinit var queue: QueueView
     private lateinit var tabs: TabLayout
     private lateinit var formScroll: ScrollView
 
     private val photoDir by lazy { File(cacheDir, "photos").apply { mkdirs() } }
     private val cameraFile by lazy { File(photoDir, "camera.jpg") }
-    private val uploadFile by lazy { File(photoDir, "upload.jpg") }
 
     private val takePicture = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) usePhoto { FileInputStream(cameraFile) }
+        if (ok) addPhoto { FileInputStream(cameraFile) }
     }
-    private val pickImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) usePhoto { contentResolver.openInputStream(uri) }
+    private val pickImages = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        for (uri in uris) {
+            if (photos.size >= ImageUtil.MAX_PHOTOS) {
+                Toast.makeText(this, "Maksimal ${ImageUtil.MAX_PHOTOS} foto", Toast.LENGTH_SHORT).show()
+                break
+            }
+            addPhoto { contentResolver.openInputStream(uri) }
+        }
     }
     private val permReq = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         startGps()
@@ -140,15 +146,20 @@ class MainActivity : AppCompatActivity() {
 
         // Foto
         box.addView(section("Foto / Dokumentasi"))
-        ivFoto = ImageView(this).apply {
-            adjustViewBounds = true
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            visibility = View.GONE
+        tvFotoInfo = TextView(this).apply {
+            text = "Maks. ${ImageUtil.MAX_PHOTOS} foto. Jika lebih dari 1, otomatis dibuat kolase."
+            textSize = 12f
+            setTextColor(0xFF666666.toInt())
+            setPadding(0, 0, 0, dp(6))
+        }
+        box.addView(tvFotoInfo)
+        thumbs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        box.addView(HorizontalScrollView(this).apply {
+            addView(thumbs)
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { bottomMargin = dp(8) }
-        }
-        box.addView(ivFoto)
+        })
         val rowFoto = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         rowFoto.addView(MaterialButton(this).apply {
             text = "Foto Langsung"
@@ -158,7 +169,10 @@ class MainActivity : AppCompatActivity() {
         rowFoto.addView(MaterialButton(this).apply {
             text = "Pilih dari HP"
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4) }
-            setOnClickListener { pickImage.launch("image/*") }
+            setOnClickListener {
+                if (photos.size >= ImageUtil.MAX_PHOTOS) toast("Maksimal ${ImageUtil.MAX_PHOTOS} foto")
+                else pickImages.launch("image/*")
+            }
         })
         box.addView(rowFoto)
 
@@ -288,7 +302,10 @@ class MainActivity : AppCompatActivity() {
 
     // ---------- Foto ----------
 
+    private fun toast(t: String) = Toast.makeText(this, t, Toast.LENGTH_LONG).show()
+
     private fun openCamera() {
+        if (photos.size >= ImageUtil.MAX_PHOTOS) { toast("Maksimal ${ImageUtil.MAX_PHOTOS} foto"); return }
         try {
             cameraFile.delete()
             cameraFile.createNewFile()
@@ -299,13 +316,44 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun usePhoto(open: () -> InputStream?) {
-        if (ImageUtil.prepare(open, uploadFile)) {
-            photoReady = true
-            ivFoto.setImageBitmap(BitmapFactory.decodeFile(uploadFile.path))
-            ivFoto.visibility = View.VISIBLE
+    private fun addPhoto(open: () -> InputStream?) {
+        val f = File(photoDir, "p_${System.currentTimeMillis()}_${photos.size}.jpg")
+        if (ImageUtil.prepare(open, f)) {
+            photos.add(f)
+            renderThumbs()
         } else {
-            Toast.makeText(this, "Foto tidak dapat dibaca. Coba lagi.", Toast.LENGTH_LONG).show()
+            toast("Foto tidak dapat dibaca. Coba lagi.")
+        }
+    }
+
+    private fun renderThumbs() {
+        thumbs.removeAllViews()
+        for (f in photos.toList()) {
+            val cell = FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(96), dp(96)).apply { rightMargin = dp(8) }
+            }
+            cell.addView(ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageBitmap(ImageUtil.thumb(f))
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            cell.addView(TextView(this).apply {
+                text = "✕"
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(0xCC000000.toInt())
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+                setOnClickListener {
+                    photos.remove(f)
+                    f.delete()
+                    renderThumbs()
+                }
+            }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END))
+            thumbs.addView(cell)
+        }
+        tvFotoInfo.text = when {
+            photos.isEmpty() -> "Maks. ${ImageUtil.MAX_PHOTOS} foto. Jika lebih dari 1, otomatis dibuat kolase."
+            photos.size == 1 -> "1 foto"
+            else -> "${photos.size} foto - akan dijadikan kolase saat Upload"
         }
     }
 
@@ -323,35 +371,42 @@ class MainActivity : AppCompatActivity() {
             blok.isEmpty() -> "Blok wajib diisi"
             problem.isEmpty() -> "Problem / Temuan wajib diisi"
             l == null -> "Koordinat GPS belum didapat. Tunggu sebentar atau tekan Ambil Ulang GPS."
-            !photoReady -> "Foto wajib diambil / dipilih"
+            photos.isEmpty() -> "Foto wajib diambil / dipilih"
             else -> null
         }
         if (msg != null) { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); return }
         l!!
 
-        // 1) Simpan dulu ke HP (data + foto) supaya tidak hilang walau tidak ada sinyal
-        val id = UUID.randomUUID().toString()
-        val dest = File(ReportStore.photoDir(this), "$id.jpg")
-        try {
-            uploadFile.copyTo(dest, overwrite = true)
-        } catch (e: Exception) {
-            Toast.makeText(this, "Gagal menyimpan foto: ${e.message}", Toast.LENGTH_LONG).show()
-            return
-        }
-        ReportStore.add(this, Report(
-            id = id, createdAt = System.currentTimeMillis(),
-            est = est, afd = afd, blok = blok, problem = problem,
-            lat = l.latitude, lon = l.longitude,
-            pelapor = prefs.getString("pelapor", "") ?: "", photoPath = dest.path,
-        ))
+        val snapshot = photos.toList()
+        val pelapor = prefs.getString("pelapor", "") ?: ""
+        val lat = l.latitude
+        val lon = l.longitude
         prefs.edit().putString("est", est).putString("afd", afd).apply()
 
-        // 2) Coba upload sekarang; jika tidak ada sinyal, masuk antrean
         btnUpload.isEnabled = false
         btnUpload.text = "Mengupload..."
         progress.visibility = View.VISIBLE
         val app = applicationContext
         Thread {
+            // 1) Buat kolase (jika >1 foto) dan simpan dulu ke HP supaya tidak hilang walau tidak ada sinyal
+            val id = UUID.randomUUID().toString()
+            val dest = File(ReportStore.photoDir(app), "$id.jpg")
+            if (!ImageUtil.collage(snapshot, dest)) {
+                runOnUiThread {
+                    btnUpload.isEnabled = true
+                    btnUpload.text = "Upload & Share"
+                    progress.visibility = View.GONE
+                    toast("Gagal memproses foto. Coba lagi.")
+                }
+                return@Thread
+            }
+            ReportStore.add(app, Report(
+                id = id, createdAt = System.currentTimeMillis(),
+                est = est, afd = afd, blok = blok, problem = problem,
+                lat = lat, lon = lon, pelapor = pelapor, photoPath = dest.path,
+            ))
+
+            // 2) Coba upload sekarang; jika tidak ada sinyal, masuk antrean
             val outcome = if (Sync.hasNetwork(app)) Sync.uploadOne(app, id) else Sync.Outcome.NETWORK
             if (outcome != Sync.Outcome.OK) Sync.schedule(app)
             runOnUiThread {
@@ -399,9 +454,9 @@ class MainActivity : AppCompatActivity() {
     private fun resetForm() {
         etBlok.setText("")
         etProblem.setText("")
-        photoReady = false
-        ivFoto.setImageDrawable(null)
-        ivFoto.visibility = View.GONE
+        photos.forEach { it.delete() }
+        photos.clear()
+        renderThumbs()
         requestGps()
     }
 

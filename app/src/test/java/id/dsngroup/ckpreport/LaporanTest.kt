@@ -20,4 +20,15 @@ class LaporanTest {
         listOf("BPN", "AFD 1", "A12", "Buah mentah", "Latitude : 0.80599;", "Longitude : 117.3097;",
             "query=0.80599,117.3097", "https://drive.google.com/x", "Budi").forEach { assertTrue(it, t.contains(it)) }
     }
+
+    @Test fun ikonWarningDanLinkPeta() {
+        val url = "https://script.google.com/macros/s/AKfy/exec"
+        val peta = Laporan.petaUrl(url, 0.80599, 117.3097)
+        assertEquals("$url?lat=0.80599&lon=117.3097", peta)
+        assertEquals("", Laporan.petaUrl("", 1.0, 2.0))
+        val t = Laporan.pesan("BPN", "AFD 1", "A12", "x", 0.80599, 117.3097, "", "", "w", peta)
+        assertTrue(t.startsWith("⚠️ *CKP SPOT REPORT* ⚠️"))
+        assertTrue(!t.contains("🔥"))
+        assertTrue(t.contains(peta))
+    }
 }
