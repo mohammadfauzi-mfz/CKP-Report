@@ -15,6 +15,7 @@ import android.util.Base64
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -27,15 +28,14 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
 
@@ -50,6 +50,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var loc: LocationHelper
     private var photoReady = false
+    private lateinit var queue: QueueView
+    private lateinit var tabs: TabLayout
+    private lateinit var formScroll: ScrollView
 
     private val photoDir by lazy { File(cacheDir, "photos").apply { mkdirs() } }
     private val cameraFile by lazy { File(photoDir, "camera.jpg") }
@@ -172,9 +175,29 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(btnUpload)
 
-        root.addView(ScrollView(this).apply {
-            addView(box)
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+        formScroll = ScrollView(this).apply { addView(box) }
+        queue = QueueView(this)
+        queue.visibility = View.GONE
+
+        tabs = TabLayout(this)
+        tabs.addTab(tabs.newTab().setText("Laporan"))
+        tabs.addTab(tabs.newTab().setText("Antrean"))
+        root.addView(tabs)
+
+        val frame = FrameLayout(this)
+        frame.addView(formScroll)
+        frame.addView(queue)
+        root.addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                val first = tab.position == 0
+                formScroll.visibility = if (first) View.VISIBLE else View.GONE
+                queue.visibility = if (first) View.GONE else View.VISIBLE
+                if (!first) queue.refresh()
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
         })
         setContentView(root)
 
@@ -182,9 +205,27 @@ class MainActivity : AppCompatActivity() {
         if (savedInstanceState == null && !hasLocationPermission()) requestGps()
     }
 
+    override fun onStart() {
+        super.onStart()
+        ReportStore.onChange = { queue.refresh(); updateBadge() }
+        queue.refresh()
+        updateBadge()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        ReportStore.onChange = null
+    }
+
     override fun onResume() {
         super.onResume()
         if (hasLocationPermission() && loc.best == null) startGps(false)
+        if (ReportStore.pendingCount(this) > 0) Sync.schedule(this)
+    }
+
+    private fun updateBadge() {
+        val n = ReportStore.pendingCount(this)
+        tabs.getTabAt(1)?.text = if (n > 0) "Antrean ($n)" else "Antrean"
     }
 
     override fun onPause() {
@@ -271,10 +312,6 @@ class MainActivity : AppCompatActivity() {
     // ---------- Upload ----------
 
     private fun doUpload() {
-        val url = prefs.getString("url", "") ?: ""
-        val token = prefs.getString("token", "") ?: ""
-        if (url.isBlank()) { showSettings(); return }
-
         val est = etEst.text.toString().trim()
         val afd = etAfd.text.toString().trim()
         val blok = etBlok.text.toString().trim()
@@ -292,77 +329,71 @@ class MainActivity : AppCompatActivity() {
         if (msg != null) { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); return }
         l!!
 
-        val pelapor = prefs.getString("pelapor", "") ?: ""
-        val lat = l.latitude
-        val lon = l.longitude
-        val mapsUrl = Laporan.mapsUrl(lat, lon)
-        val waktu = SimpleDateFormat("dd MMM yyyy HH:mm", Locale("in", "ID")).format(Date())
+        // 1) Simpan dulu ke HP (data + foto) supaya tidak hilang walau tidak ada sinyal
+        val id = UUID.randomUUID().toString()
+        val dest = File(ReportStore.photoDir(this), "$id.jpg")
+        try {
+            uploadFile.copyTo(dest, overwrite = true)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Gagal menyimpan foto: ${e.message}", Toast.LENGTH_LONG).show()
+            return
+        }
+        ReportStore.add(this, Report(
+            id = id, createdAt = System.currentTimeMillis(),
+            est = est, afd = afd, blok = blok, problem = problem,
+            lat = l.latitude, lon = l.longitude,
+            pelapor = prefs.getString("pelapor", "") ?: "", photoPath = dest.path,
+        ))
+        prefs.edit().putString("est", est).putString("afd", afd).apply()
 
+        // 2) Coba upload sekarang; jika tidak ada sinyal, masuk antrean
         btnUpload.isEnabled = false
         btnUpload.text = "Mengupload..."
         progress.visibility = View.VISIBLE
-
+        val app = applicationContext
         Thread {
-            val b64 = Base64.encodeToString(uploadFile.readBytes(), Base64.NO_WRAP)
-            val json = JSONObject()
-                .put("token", token)
-                .put("estate", est).put("afdeling", afd).put("blok", blok)
-                .put("problem", problem)
-                .put("lat", lat).put("lon", lon)
-                .put("mapsUrl", mapsUrl)
-                .put("pelapor", pelapor)
-                .put("fotoBase64", b64)
-            val r = Uploader.upload(url, json)
+            val outcome = if (Sync.hasNetwork(app)) Sync.uploadOne(app, id) else Sync.Outcome.NETWORK
+            if (outcome != Sync.Outcome.OK) Sync.schedule(app)
             runOnUiThread {
                 btnUpload.isEnabled = true
                 btnUpload.text = "Upload & Share"
                 progress.visibility = View.GONE
-                if (r.ok) {
-                    prefs.edit().putString("est", est).putString("afd", afd).apply()
-                    val teks = Laporan.pesan(est, afd, blok, problem, lat, lon, r.fotoUrl, pelapor, waktu)
-                    showSuccess(teks)
-                } else {
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("Upload gagal")
-                        .setMessage(r.error + "\n\nData Anda belum hilang, silakan coba lagi.")
-                        .setPositiveButton("OK", null)
-                        .show()
-                }
+                showResult(id, outcome)
             }
         }.start()
     }
 
-    private fun showSuccess(teks: String) {
+    private fun showResult(id: String, outcome: Sync.Outcome) {
+        val r = ReportStore.get(this, id)
+        val (title, message) = when (outcome) {
+            Sync.Outcome.OK -> Pair(
+                "Berhasil terupload ✅",
+                "Data tercatat di spreadsheet dan foto tersimpan di Google Drive.\n\nBagikan ke grup WhatsApp?"
+            )
+            Sync.Outcome.NETWORK -> Pair(
+                "Tersimpan di Antrean 📥",
+                "Sinyal belum tersedia. Laporan sudah aman tersimpan di HP dan akan terupload otomatis saat ada sinyal.\n\nAnda tetap bisa membagikannya ke WhatsApp sekarang."
+            )
+            else -> Pair(
+                "Tersimpan di Antrean, upload gagal",
+                (r?.error ?: "Upload gagal") + "\n\nLaporan aman di HP. Periksa Pengaturan lalu buka tab Antrean untuk mengupload ulang.\n\nAnda tetap bisa membagikannya ke WhatsApp sekarang."
+            )
+        }
         val d = MaterialAlertDialogBuilder(this)
-            .setTitle("Berhasil terupload ✅")
-            .setMessage("Data tercatat di spreadsheet dan foto tersimpan di Google Drive.\n\nBagikan ke grup WhatsApp?")
+            .setTitle(title)
+            .setMessage(message)
             .setCancelable(false)
             .setPositiveButton("Share ke WhatsApp", null)
             .setNegativeButton("Selesai", null)
             .create()
         d.show()
-        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener { shareWhatsApp(teks) }
+        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            ReportStore.get(this, id)?.let { Share.whatsApp(this, it) }
+        }
         d.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).setOnClickListener {
             d.dismiss()
             resetForm()
         }
-    }
-
-    private fun shareWhatsApp(teks: String) {
-        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", uploadFile)
-        fun build(pkg: String?): Intent {
-            val i = Intent(Intent.ACTION_SEND)
-            i.type = "image/jpeg"
-            i.putExtra(Intent.EXTRA_STREAM, uri)
-            i.putExtra(Intent.EXTRA_TEXT, teks)
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            if (pkg != null) i.setPackage(pkg)
-            return i
-        }
-        for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
-            try { startActivity(build(pkg)); return } catch (e: ActivityNotFoundException) {}
-        }
-        startActivity(Intent.createChooser(build(null), "Bagikan laporan"))
     }
 
     private fun resetForm() {
