@@ -142,10 +142,10 @@ class LuxCard(context: Context, private val prefs: SharedPreferences) : LinearLa
             setPadding(dp(20), dp(12), dp(20), 0)
         }
         f.addView(TextView(context).apply {
-            text = "Kalibrasi mencocokkan hasil HP dengan alat Lux Meter pembanding.\\n\\n" +
+            text = "Kalibrasi mencocokkan hasil HP dengan alat Lux Meter pembanding.\n\n" +
                 "Cara 1: Ukur cahaya yang sama dengan alat pembanding. Tekan Mulai Ukur di HP, " +
-                "lalu isi \\"Nilai alat pembanding\\" di bawah. Faktor dihitung otomatis.\\n\\n" +
-                "Cara 2: Isi langsung \\"Faktor kalibrasi\\" (pengali).\\n\\n" +
+                "lalu isi \"Nilai alat pembanding\" di bawah. Faktor dihitung otomatis.\n\n" +
+                "Cara 2: Isi langsung \"Faktor kalibrasi\" (pengali).\n\n" +
                 "Bacaan sensor mentah saat ini: " + (if (raw >= 0) "${Laporan.angka(raw.toDouble(), 1)} lx" else "belum ada (tekan Mulai Ukur)")
             textSize = 13f
             setPadding(0, 0, 0, dp(12))
