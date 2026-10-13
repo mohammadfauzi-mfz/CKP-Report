@@ -56,6 +56,25 @@ object Sync {
                 .put("mapsUrl", Laporan.mapsUrl(r.lat, r.lon))
                 .put("pelapor", r.pelapor)
                 .put("fotoBase64", b64)
+                .put("activity", r.activityText)
+                .put("lux", if (r.lux >= 0) r.lux else JSONObject.NULL)
+            r.losses?.let { l ->
+                json.put("losses", JSONObject().put("namaAncak", l.namaAncak).put("luas", l.luas)
+                    .put("brondol", l.brondol).put("janjang", l.janjang).put("bjr", l.bjr)
+                    .put("lossesJjg", l.lossesJjg).put("total", l.total).put("perHa", l.perHa))
+            }
+            r.grading?.let { g ->
+                json.put("grading", JSONObject().put("noTph", g.noTph)
+                    .put("ripe", g.ripe).put("mengkal", g.mengkal).put("mentah", g.mentah).put("overripe", g.overripe)
+                    .put("total", g.total)
+                    .put("pRipe", g.pct(g.ripe)).put("pMengkal", g.pct(g.mengkal))
+                    .put("pMentah", g.pct(g.mentah)).put("pOverripe", g.pct(g.overripe))
+                    .put("bjr", g.bjr).put("tonase", g.tonase).put("brondol", g.brondol).put("pBrondol", g.brondolPct))
+            }
+            r.kalibrasi?.let { k ->
+                json.put("kalibrasi", JSONObject().put("noTph", k.noTph).put("janjang", k.janjang)
+                    .put("tonaseKg", k.tonaseKg).put("bjr", k.bjr))
+            }
 
             val res = Uploader.upload(url, json)
             return when {

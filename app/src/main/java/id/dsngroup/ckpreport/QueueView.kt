@@ -123,6 +123,9 @@ class QueueView(context: Context) : LinearLayout(context) {
                 setTypeface(null, Typeface.BOLD)
             })
             col.addView(TextView(card.context).apply { text = r.waktuText; textSize = 12f; setTextColor(0xFF666666.toInt()) })
+            if (r.activityText.isNotBlank()) col.addView(TextView(card.context).apply {
+                text = "Activity: ${r.activityText}"; textSize = 12f; setTextColor(0xFF1B5E20.toInt())
+            })
             col.addView(TextView(card.context).apply {
                 text = when {
                     !pending -> "✅ Terupload ke spreadsheet & Drive"

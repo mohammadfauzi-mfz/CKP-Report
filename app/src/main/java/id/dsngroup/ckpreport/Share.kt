@@ -8,11 +8,9 @@ import java.io.File
 
 object Share {
     fun teks(ctx: Context, r: Report): String {
-        val url = ctx.getSharedPreferences("ckp", Context.MODE_PRIVATE).getString("url", "") ?: ""
-        return Laporan.pesan(
-            r.est, r.afd, r.blok, r.problem, r.lat, r.lon, r.fotoUrl, r.pelapor, r.waktuText,
-            Laporan.petaUrl(url, r.lat, r.lon),
-        )
+        val pt = ctx.getSharedPreferences("ckp", Context.MODE_PRIVATE).getString("pt", Laporan.DEFAULT_PT)
+            ?: Laporan.DEFAULT_PT
+        return Laporan.pesan(r, pt)
     }
 
     /** Bagikan foto + teks ke WhatsApp. Tetap bisa dipakai walau belum terupload (tanpa link foto Drive). */

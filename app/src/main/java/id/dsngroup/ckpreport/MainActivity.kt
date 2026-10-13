@@ -3,6 +3,8 @@ package id.dsngroup.ckpreport
 import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
@@ -16,6 +18,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -45,6 +48,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etBlok: TextInputEditText
     private lateinit var etProblem: TextInputEditText
     private lateinit var tvGps: TextView
+    private lateinit var tvPt: TextView
+    private lateinit var activities: ActivityForm
+    private lateinit var lux: LuxCard
     private lateinit var thumbs: LinearLayout
     private lateinit var tvFotoInfo: TextView
     private lateinit var btnUpload: MaterialButton
@@ -98,14 +104,22 @@ class MainActivity : AppCompatActivity() {
             text = "CKP SPOT REPORT"; textSize = 20f
             setTypeface(null, Typeface.BOLD); setTextColor(0xFFFFFFFF.toInt())
         })
-        titles.addView(TextView(this).apply {
-            text = "PT. Bima Palma Nugraha"; textSize = 14f; setTextColor(0xFFE8F5E9.toInt())
-        })
+        tvPt = TextView(this).apply {
+            text = prefs.getString("pt", Laporan.DEFAULT_PT); textSize = 14f; setTextColor(0xFFE8F5E9.toInt())
+        }
+        titles.addView(tvPt)
         header.addView(titles)
         header.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
             text = "Pengaturan"
             setTextColor(0xFFFFFFFF.toInt())
             setOnClickListener { showSettings() }
+        })
+        header.addView(ImageButton(this).apply {
+            setImageResource(R.drawable.ic_info)
+            contentDescription = "Informasi"
+            setBackgroundColor(0x00000000)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            setOnClickListener { startActivity(Intent(this@MainActivity, AboutActivity::class.java)) }
         })
         root.addView(header)
 
@@ -121,6 +135,10 @@ class MainActivity : AppCompatActivity() {
         etEst = eEst; etAfd = eAfd; etBlok = eBlok
         box.addView(tEst); box.addView(tAfd); box.addView(tBlok)
 
+        // Activity (Losses / Grading TPH / Kalibrasi BJR)
+        activities = ActivityForm(this)
+        box.addView(activities)
+
         // Problem
         box.addView(section("Problem / Temuan"))
         val (tPro, ePro) = field("Tuliskan temuan di lapangan",
@@ -130,6 +148,11 @@ class MainActivity : AppCompatActivity() {
         etProblem = ePro
         box.addView(tPro)
 
+        // Lux Meter
+        box.addView(section("Pengukur Cahaya"))
+        lux = LuxCard(this, prefs)
+        box.addView(lux)
+
         // Koordinat
         box.addView(section("Koordinat (diambil dengan GPS)"))
         tvGps = TextView(this).apply {
@@ -137,6 +160,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             setPadding(dp(12), dp(12), dp(12), dp(12))
             setBackgroundColor(0xFFE8F5E9.toInt())
+            setOnClickListener { copyCoordinate() }
         }
         box.addView(tvGps)
         box.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
@@ -244,6 +268,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        lux.stop()
         loc.stop()
     }
 
@@ -297,7 +322,17 @@ class MainActivity : AppCompatActivity() {
     private fun showLocation(l: android.location.Location) {
         tvGps.text = "Latitude : ${Laporan.koordinat(l.latitude)}\n" +
             "Longitude : ${Laporan.koordinat(l.longitude)}\n" +
-            "Akurasi : ±${l.accuracy.toInt()} m"
+            "Akurasi : ±${l.accuracy.toInt()} m\n" +
+            "Ketuk kotak ini untuk menyalin: ${Laporan.koordinatSalin(l.latitude, l.longitude)}"
+    }
+
+    private fun copyCoordinate() {
+        val l = loc.best
+        if (l == null) { toast("Koordinat belum didapat"); return }
+        val t = Laporan.koordinatSalin(l.latitude, l.longitude)
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("Koordinat", t))
+        toast("Koordinat disalin: $t")
     }
 
     // ---------- Foto ----------
@@ -372,7 +407,7 @@ class MainActivity : AppCompatActivity() {
             problem.isEmpty() -> "Problem / Temuan wajib diisi"
             l == null -> "Koordinat GPS belum didapat. Tunggu sebentar atau tekan Ambil Ulang GPS."
             photos.isEmpty() -> "Foto wajib diambil / dipilih"
-            else -> null
+            else -> activities.validate()
         }
         if (msg != null) { Toast.makeText(this, msg, Toast.LENGTH_LONG).show(); return }
         l!!
@@ -381,6 +416,10 @@ class MainActivity : AppCompatActivity() {
         val pelapor = prefs.getString("pelapor", "") ?: ""
         val lat = l.latitude
         val lon = l.longitude
+        val losses = activities.losses()
+        val grading = activities.grading()
+        val kalibrasi = activities.kalibrasi()
+        val luxVal = lux.saved
         prefs.edit().putString("est", est).putString("afd", afd).apply()
 
         btnUpload.isEnabled = false
@@ -404,6 +443,7 @@ class MainActivity : AppCompatActivity() {
                 id = id, createdAt = System.currentTimeMillis(),
                 est = est, afd = afd, blok = blok, problem = problem,
                 lat = lat, lon = lon, pelapor = pelapor, photoPath = dest.path,
+                losses = losses, grading = grading, kalibrasi = kalibrasi, lux = luxVal,
             ))
 
             // 2) Coba upload sekarang; jika tidak ada sinyal, masuk antrean
@@ -454,6 +494,8 @@ class MainActivity : AppCompatActivity() {
     private fun resetForm() {
         etBlok.setText("")
         etProblem.setText("")
+        activities.reset()
+        lux.reset()
         photos.forEach { it.delete() }
         photos.clear()
         renderThumbs()
@@ -467,12 +509,14 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(12), dp(20), 0)
         }
+        val (tPt, ePt) = field("Nama PT (tampil di header & laporan WA)", prefs.getString("pt", Laporan.DEFAULT_PT) ?: Laporan.DEFAULT_PT,
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
         val (tUrl, eUrl) = field("URL Web App (Apps Script)", prefs.getString("url", "") ?: "",
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI)
         val (tTok, eTok) = field("Kode rahasia", prefs.getString("token", "") ?: "", InputType.TYPE_CLASS_TEXT)
         val (tNama, eNama) = field("Nama pelapor (opsional)", prefs.getString("pelapor", "") ?: "",
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
-        f.addView(tUrl); f.addView(tTok); f.addView(tNama)
+        f.addView(tPt); f.addView(tUrl); f.addView(tTok); f.addView(tNama)
 
         val d = MaterialAlertDialogBuilder(this)
             .setTitle("Pengaturan")
@@ -487,7 +531,10 @@ class MainActivity : AppCompatActivity() {
                 tUrl.error = "Harus diawali https://script.google.com/"
                 return@setOnClickListener
             }
+            val pt = ePt.text.toString().trim().ifEmpty { Laporan.DEFAULT_PT }
+            tvPt.text = pt
             prefs.edit()
+                .putString("pt", pt)
                 .putString("url", url)
                 .putString("token", eTok.text.toString().trim())
                 .putString("pelapor", eNama.text.toString().trim())
