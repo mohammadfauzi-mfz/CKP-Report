@@ -47,6 +47,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etAfd: TextInputEditText
     private lateinit var etBlok: TextInputEditText
     private lateinit var etProblem: TextInputEditText
+    private lateinit var etPerbaikan: TextInputEditText
     private lateinit var tvGps: TextView
     private lateinit var tvPt: TextView
     private lateinit var activities: ActivityForm
@@ -136,7 +137,7 @@ class MainActivity : AppCompatActivity() {
         box.addView(tEst); box.addView(tAfd); box.addView(tBlok)
 
         // Activity (Losses / Grading TPH / Kalibrasi BJR)
-        activities = ActivityForm(this)
+        activities = ActivityForm(this) { loc.best }
         box.addView(activities)
 
         // Problem
@@ -147,6 +148,15 @@ class MainActivity : AppCompatActivity() {
         ePro.gravity = Gravity.TOP
         etProblem = ePro
         box.addView(tPro)
+
+        // Perbaikan (opsional)
+        box.addView(section("Perbaikan :"))
+        val (tPer, ePer) = field("Tuliskan perbaikan yang dilakukan atau direncanakan",
+            "", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        ePer.minLines = 3
+        ePer.gravity = Gravity.TOP
+        etPerbaikan = ePer
+        box.addView(tPer)
 
         // Lux Meter
         box.addView(section("Pengukur Cahaya"))
@@ -420,6 +430,7 @@ class MainActivity : AppCompatActivity() {
         val grading = activities.grading()
         val kalibrasi = activities.kalibrasi()
         val luxVal = lux.saved
+        val perbaikan = etPerbaikan.text.toString().trim()
         prefs.edit().putString("est", est).putString("afd", afd).apply()
 
         btnUpload.isEnabled = false
@@ -443,7 +454,7 @@ class MainActivity : AppCompatActivity() {
                 id = id, createdAt = System.currentTimeMillis(),
                 est = est, afd = afd, blok = blok, problem = problem,
                 lat = lat, lon = lon, pelapor = pelapor, photoPath = dest.path,
-                losses = losses, grading = grading, kalibrasi = kalibrasi, lux = luxVal,
+                losses = losses, grading = grading, kalibrasi = kalibrasi, lux = luxVal, perbaikan = perbaikan,
             ))
 
             // 2) Coba upload sekarang; jika tidak ada sinyal, masuk antrean
@@ -494,6 +505,7 @@ class MainActivity : AppCompatActivity() {
     private fun resetForm() {
         etBlok.setText("")
         etProblem.setText("")
+        etPerbaikan.setText("")
         activities.reset()
         lux.reset()
         photos.forEach { it.delete() }

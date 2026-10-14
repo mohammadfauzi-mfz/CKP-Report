@@ -1,6 +1,11 @@
 package id.dsngroup.ckpreport
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.location.Location
+import android.widget.Toast
+import com.google.android.material.button.MaterialButton
 import android.graphics.Typeface
 import android.text.InputType
 import android.view.Gravity
@@ -12,7 +17,67 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 
 /** Checklist Activity (Losses / Grading TPH / Kalibrasi BJR). Rincian muncul hanya jika dicentang. */
-class ActivityForm(context: Context) : LinearLayout(context) {
+class ActivityForm(context: Context, private val locProvider: () -> Location?) : LinearLayout(context) {
+
+    /** Koordinat khusus untuk satu activity (Grading TPH / Kalibrasi BJR): diambil dari GPS saat tombol ditekan. */
+    private inner class Coord(panel: LinearLayout) {
+        var lat = Double.NaN
+        var lon = Double.NaN
+        val has: Boolean get() = !lat.isNaN() && !lon.isNaN()
+        private val tv = TextView(context)
+
+        init {
+            panel.addView(TextView(context).apply {
+                text = "Koordinat TPH ini"
+                textSize = 14f
+                setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(4), 0, dp(4))
+            })
+            tv.textSize = 14f
+            tv.setPadding(dp(12), dp(10), dp(12), dp(10))
+            tv.setBackgroundColor(0xFFE8F5E9.toInt())
+            tv.setOnClickListener { copy() }
+            panel.addView(tv)
+            panel.addView(MaterialButton(context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+                text = "Ambil Koordinat Sekarang"
+                setOnClickListener { capture(true) }
+            })
+            show()
+        }
+
+        fun capture(manual: Boolean) {
+            val l = locProvider()
+            if (l == null) {
+                if (manual) Toast.makeText(context, "Koordinat GPS belum didapat. Tunggu sebentar lalu coba lagi.", Toast.LENGTH_LONG).show()
+                return
+            }
+            lat = l.latitude
+            lon = l.longitude
+            show()
+        }
+
+        fun clear() {
+            lat = Double.NaN
+            lon = Double.NaN
+            show()
+        }
+
+        private fun show() {
+            tv.text = if (has) Laporan.koordinatSalin(lat, lon) + "\n(ketuk untuk menyalin)"
+            else "Belum ada koordinat. Tekan tombol di bawah saat berada di TPH."
+        }
+
+        private fun copy() {
+            if (!has) return
+            val t = Laporan.koordinatSalin(lat, lon)
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("Koordinat", t))
+            Toast.makeText(context, "Koordinat disalin: $t", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private lateinit var coordG: Coord
+    private lateinit var coordK: Coord
 
     private val cbLosses = MaterialCheckBox(context)
     private val cbGrading = MaterialCheckBox(context)
@@ -62,8 +127,8 @@ class ActivityForm(context: Context) : LinearLayout(context) {
             setPadding(0, dp(16), 0, dp(4))
         })
         link(cbLosses, "Losses", pLosses)
-        link(cbGrading, "Grading TPH", pGrading)
-        link(cbKal, "Kalibrasi BJR", pKal)
+        link(cbGrading, "Grading TPH", pGrading) { if (it && !coordG.has) coordG.capture(false) }
+        link(cbKal, "Kalibrasi BJR", pKal) { if (it && !coordK.has) coordK.capture(false) }
         addView(cbLosses); addView(pLosses)
         addView(cbGrading); addView(pGrading)
         addView(cbKal); addView(pKal)
@@ -83,10 +148,13 @@ class ActivityForm(context: Context) : LinearLayout(context) {
         ).apply { bottomMargin = dp(8) }
     }
 
-    private fun link(cb: MaterialCheckBox, label: String, p: LinearLayout) {
+    private fun link(cb: MaterialCheckBox, label: String, p: LinearLayout, onChecked: (Boolean) -> Unit = {}) {
         cb.text = label
         cb.textSize = 16f
-        cb.setOnCheckedChangeListener { _, checked -> p.visibility = if (checked) View.VISIBLE else View.GONE }
+        cb.setOnCheckedChangeListener { _, checked ->
+            p.visibility = if (checked) View.VISIBLE else View.GONE
+            onChecked(checked)
+        }
     }
 
     private fun title(p: LinearLayout, t: String) {
@@ -151,6 +219,7 @@ class ActivityForm(context: Context) : LinearLayout(context) {
         val (t, e) = inputField(context, "No TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphG = e
         pGrading.addView(t)
+        coordG = Coord(pGrading)
         pGrading.addView(TextView(context).apply { text = "Kriteria  (JJG  /  %)"; textSize = 13f; setPadding(0, 0, 0, dp(4)) })
         criteriaRow("Ripe").let { etRipe = it.first; tvPRipe = it.second }
         criteriaRow("Mengkal").let { etMengkal = it.first; tvPMengkal = it.second }
@@ -168,6 +237,7 @@ class ActivityForm(context: Context) : LinearLayout(context) {
         val (t, e) = inputField(context, "No. TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphK = e
         pKal.addView(t)
+        coordK = Coord(pKal)
         etJjgK = num(pKal, "Jumlah Janjang (JJG)")
         etTonK = num(pKal, "Tonase (Kg)")
         tvBjrK = result(pKal, "BJR (Kg)")
@@ -206,12 +276,12 @@ class ActivityForm(context: Context) : LinearLayout(context) {
         if (!force && !cbGrading.isChecked) null
         else GradingData(
             etTphG.text.toString().trim(), etRipe.num(), etMengkal.num(), etMentah.num(), etOverripe.num(),
-            etBjrG.num(), etBrondolG.num(),
+            etBjrG.num(), etBrondolG.num(), coordG.lat, coordG.lon,
         )
 
     fun kalibrasi(force: Boolean = false): KalibrasiData? =
         if (!force && !cbKal.isChecked) null
-        else KalibrasiData(etTphK.text.toString().trim(), etJjgK.num(), etTonK.num())
+        else KalibrasiData(etTphK.text.toString().trim(), etJjgK.num(), etTonK.num(), coordK.lat, coordK.lon)
 
     /** @return pesan kesalahan, atau null jika isian activity sudah lengkap. */
     fun validate(): String? {
@@ -219,10 +289,12 @@ class ActivityForm(context: Context) : LinearLayout(context) {
         grading()?.let {
             if (it.noTph.isEmpty()) return "Grading TPH: No TPH wajib diisi"
             if (it.total <= 0.0) return "Grading TPH: isi jumlah janjang (Ripe/Mengkal/Mentah/Overripe)"
+            if (!it.hasCoord) return "Grading TPH: koordinat belum ada. Tekan \"Ambil Koordinat Sekarang\""
         }
         kalibrasi()?.let {
             if (it.noTph.isEmpty()) return "Kalibrasi BJR: No. TPH wajib diisi"
             if (it.janjang <= 0.0) return "Kalibrasi BJR: Jumlah Janjang harus lebih dari 0"
+            if (!it.hasCoord) return "Kalibrasi BJR: koordinat belum ada. Tekan \"Ambil Koordinat Sekarang\""
         }
         return null
     }
@@ -230,6 +302,8 @@ class ActivityForm(context: Context) : LinearLayout(context) {
     fun reset() {
         listOf(etAncak, etLuas, etBrondol, etJanjang, etBjr, etTphG, etRipe, etMengkal, etMentah, etOverripe,
             etBjrG, etBrondolG, etTphK, etJjgK, etTonK).forEach { it.setText("") }
+        coordG.clear()
+        coordK.clear()
         cbLosses.isChecked = false
         cbGrading.isChecked = false
         cbKal.isChecked = false

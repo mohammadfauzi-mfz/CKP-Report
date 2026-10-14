@@ -28,6 +28,7 @@ data class Report(
     val grading: GradingData? = null,
     val kalibrasi: KalibrasiData? = null,
     val lux: Double = -1.0,
+    val perbaikan: String = "",
     var status: String = ST_PENDING,
     var fotoUrl: String = "",
     var error: String = "",
@@ -124,10 +125,10 @@ object ReportStore {
         .put("id", r.id).put("t", r.createdAt)
         .put("est", r.est).put("afd", r.afd).put("blok", r.blok).put("problem", r.problem)
         .put("lat", r.lat).put("lon", r.lon).put("pelapor", r.pelapor).put("photo", r.photoPath)
-        .put("lux", r.lux)
+        .put("lux", r.lux).put("perbaikan", r.perbaikan)
         .put("losses", r.losses?.let { JSONObject().put("n", it.namaAncak).put("l", it.luas).put("b", it.brondol).put("j", it.janjang).put("bjr", it.bjr) })
-        .put("grading", r.grading?.let { JSONObject().put("t", it.noTph).put("r", it.ripe).put("m", it.mengkal).put("mt", it.mentah).put("o", it.overripe).put("bjr", it.bjr).put("b", it.brondol) })
-        .put("kal", r.kalibrasi?.let { JSONObject().put("t", it.noTph).put("j", it.janjang).put("k", it.tonaseKg) })
+        .put("grading", r.grading?.let { JSONObject().put("t", it.noTph).put("r", it.ripe).put("m", it.mengkal).put("mt", it.mentah).put("o", it.overripe).put("bjr", it.bjr).put("b", it.brondol).also { o -> if (it.hasCoord) o.put("lat", it.lat).put("lon", it.lon) } })
+        .put("kal", r.kalibrasi?.let { JSONObject().put("t", it.noTph).put("j", it.janjang).put("k", it.tonaseKg).also { o -> if (it.hasCoord) o.put("lat", it.lat).put("lon", it.lon) } })
         .put("status", r.status).put("fotoUrl", r.fotoUrl).put("error", r.error).put("upAt", r.uploadedAt)
 
     private fun fromJson(o: JSONObject) = Report(
@@ -137,10 +138,11 @@ object ReportStore {
         pelapor = o.optString("pelapor", ""), photoPath = o.getString("photo"),
         losses = o.optJSONObject("losses")?.let { LossesData(it.getString("n"), it.getDouble("l"), it.getDouble("b"), it.getDouble("j"), it.getDouble("bjr")) },
         grading = o.optJSONObject("grading")?.let {
-            GradingData(it.getString("t"), it.getDouble("r"), it.getDouble("m"), it.getDouble("mt"), it.getDouble("o"), it.getDouble("bjr"), it.getDouble("b"))
+            GradingData(it.getString("t"), it.getDouble("r"), it.getDouble("m"), it.getDouble("mt"), it.getDouble("o"), it.getDouble("bjr"), it.getDouble("b"),
+                it.optDouble("lat", Double.NaN), it.optDouble("lon", Double.NaN))
         },
-        kalibrasi = o.optJSONObject("kal")?.let { KalibrasiData(it.getString("t"), it.getDouble("j"), it.getDouble("k")) },
-        lux = o.optDouble("lux", -1.0),
+        kalibrasi = o.optJSONObject("kal")?.let { KalibrasiData(it.getString("t"), it.getDouble("j"), it.getDouble("k"), it.optDouble("lat", Double.NaN), it.optDouble("lon", Double.NaN)) },
+        lux = o.optDouble("lux", -1.0), perbaikan = o.optString("perbaikan", ""),
         status = o.optString("status", ST_PENDING), fotoUrl = o.optString("fotoUrl", ""),
         error = o.optString("error", ""), uploadedAt = o.optLong("upAt", 0L),
     )

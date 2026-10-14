@@ -44,4 +44,31 @@ class LaporanTest {
             .forEach { assertTrue(it, t.contains(it)) }
         assertTrue(!t.contains("Grading TPH"))
     }
+
+    @Test fun ikonLossesPerHa() {
+        val buruk = Laporan.pesan(rep(LossesData("a", 2.0, 12.0, 20.0, 0.8)), "PT")   // 14 Kg/Ha
+        assertTrue(buruk.contains("Losses/Ha : 14 Kg/Ha ⚠️"))
+        val baik = Laporan.pesan(rep(LossesData("a", 10.0, 5.0, 0.0, 0.8)), "PT")      // 0,5 Kg/Ha
+        assertTrue(baik.contains("Kg/Ha ✅"))
+        val batas = Laporan.pesan(rep(LossesData("a", 10.0, 10.0, 0.0, 0.8)), "PT")    // tepat 1,00 -> baik
+        assertTrue(batas.contains("Losses/Ha : 1 Kg/Ha ✅"))
+    }
+
+    @Test fun ikonBrondolPersen() {
+        // tonase = 10*100/1000 = 1 ton; brondol 40 Kg = 4% (<5%) -> warning
+        val g1 = GradingData("T1", 100.0, 0.0, 0.0, 0.0, 10.0, 40.0, 0.7, 117.4)
+        assertTrue(Laporan.pesan(rep(g = g1), "PT").contains("(4%) ⚠️"))
+        val g2 = GradingData("T1", 100.0, 0.0, 0.0, 0.0, 10.0, 50.0, 0.7, 117.4)   // tepat 5% -> check
+        assertTrue(Laporan.pesan(rep(g = g2), "PT").contains("(5%) ✅"))
+    }
+
+    @Test fun koordinatSendiriDanPerbaikan() {
+        val r = rep(g = GradingData("T1", 10.0, 0.0, 0.0, 0.0, 10.0, 1.0, 0.1, 117.2),
+            k = KalibrasiData("T2", 10.0, 186.0, 0.3, 117.3)).copy(perbaikan = "Rawat piringan")
+        val t = Laporan.pesan(r, "PT")
+        assertTrue(t.contains("Koordinat : 0.100000,117.200000"))
+        assertTrue(t.contains("Koordinat : 0.300000,117.300000"))
+        assertTrue(t.contains("*Perbaikan :*\nRawat piringan"))
+        assertTrue(!Laporan.pesan(rep(), "PT").contains("Perbaikan"))
+    }
 }

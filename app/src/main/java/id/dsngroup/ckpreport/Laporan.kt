@@ -30,6 +30,13 @@ object Laporan {
 
     fun persen(fraction: Double): String = angka(fraction * 100.0, 1) + "%"
 
+    private fun ikon(baik: Boolean) = if (baik) "✅" else "⚠️"
+
+    private fun blokKoordinat(sb: StringBuilder, lat: Double, lon: Double) {
+        sb.append("Koordinat : ${koordinatSalin(lat, lon)}\n")
+        sb.append("Google Maps : ${mapsUrl(lat, lon)}\n")
+    }
+
     /** Teks untuk dibagikan ke grup WhatsApp. */
     fun pesan(r: Report, perusahaan: String): String {
         val sb = StringBuilder()
@@ -51,7 +58,7 @@ object Laporan {
             sb.append("BJR : ${angka(l.bjr)} Kg\n")
             sb.append("Losses JJG : ${angka(l.lossesJjg)} Kg\n")
             sb.append("Total Losses : ${angka(l.total)} Kg\n")
-            sb.append("Losses/Ha : ${angka(l.perHa)} Kg/Ha\n")
+            sb.append("Losses/Ha : ${angka(l.perHa)} Kg/Ha" + (if (l.dinilai) " ${ikon(l.baik)}" else "") + "\n")
         }
         r.grading?.let { g ->
             sb.append("\n*Grading TPH*\n")
@@ -63,7 +70,8 @@ object Laporan {
             sb.append("Total JJG : ${angka(g.total)}\n")
             sb.append("BJR : ${angka(g.bjr)} Kg\n")
             sb.append("Tonase : ${angka(g.tonase, 3)} Ton\n")
-            sb.append("Brondol : ${angka(g.brondol)} Kg (${persen(g.brondolPct)})\n")
+            sb.append("Brondol : ${angka(g.brondol)} Kg (${persen(g.brondolPct)})" + (if (g.dinilai) " ${ikon(g.baik)}" else "") + "\n")
+            if (g.hasCoord) blokKoordinat(sb, g.lat, g.lon)
         }
         r.kalibrasi?.let { k ->
             sb.append("\n*Kalibrasi BJR*\n")
@@ -71,9 +79,11 @@ object Laporan {
             sb.append("Jumlah Janjang : ${angka(k.janjang)} JJG\n")
             sb.append("Tonase : ${angka(k.tonaseKg)} Kg\n")
             sb.append("BJR : ${angka(k.bjr)} Kg\n")
+            if (k.hasCoord) blokKoordinat(sb, k.lat, k.lon)
         }
 
         sb.append("\n*Problem / Temuan :*\n${r.problem}\n")
+        if (r.perbaikan.isNotBlank()) sb.append("\n*Perbaikan :*\n${r.perbaikan}\n")
         if (r.lux >= 0) sb.append("\nCahaya : ${angka(r.lux, 0)} Lux\n")
 
         sb.append("\n*Koordinat :*\n")

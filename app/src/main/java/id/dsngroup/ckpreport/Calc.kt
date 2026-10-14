@@ -13,6 +13,11 @@ data class LossesData(
     val lossesJjg: Double get() = bjr * janjang                      // =D10*D9
     val total: Double get() = brondol + lossesJjg                    // =SUM(D8,D11)
     val perHa: Double get() = if (luas != 0.0) total / luas else 0.0 // =IFERROR(D12/D7,0)
+
+    /** Ada ikon penilaian hanya jika luas terisi. */
+    val dinilai: Boolean get() = luas > 0.0
+    /** Losses/Ha <= 1,00 Kg/Ha = baik (dibandingkan setelah dibulatkan 2 desimal seperti yang tampil). */
+    val baik: Boolean get() = Math.round(perHa * 100.0) / 100.0 <= 1.0
 }
 
 /** Grading TPH */
@@ -24,7 +29,13 @@ data class GradingData(
     val overripe: Double,
     val bjr: Double,
     val brondol: Double,   // Brondol (Kg)
+    val lat: Double = Double.NaN,   // koordinat TPH ini (NaN = belum ada)
+    val lon: Double = Double.NaN,
 ) {
+    val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
+    val dinilai: Boolean get() = tonase > 0.0
+    /** Brondol >= 5,00% = baik (dibandingkan setelah dibulatkan 2 desimal seperti yang tampil). */
+    val baik: Boolean get() = Math.round(brondolPct * 10000.0) / 100.0 >= 5.0
     val total: Double get() = ripe + mengkal + mentah + overripe          // =SUM(D18:D21)
     fun pct(v: Double): Double = if (total > 0.0) v / total else 0.0       // =D18/$D$22
     val tonase: Double get() = bjr * total / 1000.0                       // =D23*D22/1000 (Ton)
@@ -36,6 +47,9 @@ data class KalibrasiData(
     val noTph: String,
     val janjang: Double,   // Jumlah Janjang (JJG)
     val tonaseKg: Double,  // Tonase (Kg)
+    val lat: Double = Double.NaN,   // koordinat TPH ini (NaN = belum ada)
+    val lon: Double = Double.NaN,
 ) {
+    val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
     val bjr: Double get() = if (janjang > 0.0) tonaseKg / janjang else 0.0 // =D30/D29
 }

@@ -57,6 +57,7 @@ object Sync {
                 .put("pelapor", r.pelapor)
                 .put("fotoBase64", b64)
                 .put("activity", r.activityText)
+                .put("perbaikan", r.perbaikan)
                 .put("lux", if (r.lux >= 0) r.lux else JSONObject.NULL)
             r.losses?.let { l ->
                 json.put("losses", JSONObject().put("namaAncak", l.namaAncak).put("luas", l.luas)
@@ -69,11 +70,13 @@ object Sync {
                     .put("total", g.total)
                     .put("pRipe", g.pct(g.ripe)).put("pMengkal", g.pct(g.mengkal))
                     .put("pMentah", g.pct(g.mentah)).put("pOverripe", g.pct(g.overripe))
-                    .put("bjr", g.bjr).put("tonase", g.tonase).put("brondol", g.brondol).put("pBrondol", g.brondolPct))
+                    .put("bjr", g.bjr).put("tonase", g.tonase).put("brondol", g.brondol).put("pBrondol", g.brondolPct)
+                    .also { o -> if (g.hasCoord) o.put("lat", g.lat).put("lon", g.lon) })
             }
             r.kalibrasi?.let { k ->
                 json.put("kalibrasi", JSONObject().put("noTph", k.noTph).put("janjang", k.janjang)
-                    .put("tonaseKg", k.tonaseKg).put("bjr", k.bjr))
+                    .put("tonaseKg", k.tonaseKg).put("bjr", k.bjr)
+                    .also { o -> if (k.hasCoord) o.put("lat", k.lat).put("lon", k.lon) })
             }
 
             val res = Uploader.upload(url, json)
