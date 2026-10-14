@@ -98,6 +98,10 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     // Grading
     private lateinit var etTphG: TextInputEditText
+    private lateinit var etNamaG: TextInputEditText
+    private lateinit var etKodeG: TextInputEditText
+    private lateinit var etNamaK: TextInputEditText
+    private lateinit var etKodeK: TextInputEditText
     private lateinit var etRipe: TextInputEditText
     private lateinit var etMengkal: TextInputEditText
     private lateinit var etMentah: TextInputEditText
@@ -219,6 +223,10 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
         val (t, e) = inputField(context, "No TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphG = e
         pGrading.addView(t)
+        val (tn, en) = inputField(context, "Nama Pemanen", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
+        val (tk, ek) = inputField(context, "Kode Pemanen", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
+        etNamaG = en; etKodeG = ek
+        pGrading.addView(tn); pGrading.addView(tk)
         coordG = Coord(pGrading)
         pGrading.addView(TextView(context).apply { text = "Kriteria  (JJG  /  %)"; textSize = 13f; setPadding(0, 0, 0, dp(4)) })
         criteriaRow("Ripe").let { etRipe = it.first; tvPRipe = it.second }
@@ -237,6 +245,10 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
         val (t, e) = inputField(context, "No. TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphK = e
         pKal.addView(t)
+        val (tn, en) = inputField(context, "Nama Pemanen", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
+        val (tk, ek) = inputField(context, "Kode Pemanen", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
+        etNamaK = en; etKodeK = ek
+        pKal.addView(tn); pKal.addView(tk)
         coordK = Coord(pKal)
         etJjgK = num(pKal, "Jumlah Janjang (JJG)")
         etTonK = num(pKal, "Tonase (Kg)")
@@ -277,11 +289,13 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
         else GradingData(
             etTphG.text.toString().trim(), etRipe.num(), etMengkal.num(), etMentah.num(), etOverripe.num(),
             etBjrG.num(), etBrondolG.num(), coordG.lat, coordG.lon,
+            etNamaG.text.toString().trim(), etKodeG.text.toString().trim(),
         )
 
     fun kalibrasi(force: Boolean = false): KalibrasiData? =
         if (!force && !cbKal.isChecked) null
-        else KalibrasiData(etTphK.text.toString().trim(), etJjgK.num(), etTonK.num(), coordK.lat, coordK.lon)
+        else KalibrasiData(etTphK.text.toString().trim(), etJjgK.num(), etTonK.num(), coordK.lat, coordK.lon,
+            etNamaK.text.toString().trim(), etKodeK.text.toString().trim())
 
     /** @return pesan kesalahan, atau null jika isian activity sudah lengkap. */
     fun validate(): String? {
@@ -301,7 +315,7 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     fun reset() {
         listOf(etAncak, etLuas, etBrondol, etJanjang, etBjr, etTphG, etRipe, etMengkal, etMentah, etOverripe,
-            etBjrG, etBrondolG, etTphK, etJjgK, etTonK).forEach { it.setText("") }
+            etBjrG, etBrondolG, etTphK, etJjgK, etTonK, etNamaG, etKodeG, etNamaK, etKodeK).forEach { it.setText("") }
         coordG.clear()
         coordK.clear()
         cbLosses.isChecked = false

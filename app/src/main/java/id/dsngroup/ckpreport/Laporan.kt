@@ -63,6 +63,8 @@ object Laporan {
         r.grading?.let { g ->
             sb.append("\n*Grading TPH*\n")
             sb.append("No TPH : ${g.noTph}\n")
+            if (g.namaPemanen.isNotBlank()) sb.append("Nama Pemanen : ${g.namaPemanen}\n")
+            if (g.kodePemanen.isNotBlank()) sb.append("Kode Pemanen : ${g.kodePemanen}\n")
             sb.append("Ripe : ${angka(g.ripe)} JJG (${persen(g.pct(g.ripe))})\n")
             sb.append("Mengkal : ${angka(g.mengkal)} JJG (${persen(g.pct(g.mengkal))})\n")
             sb.append("Mentah : ${angka(g.mentah)} JJG (${persen(g.pct(g.mentah))})\n")
@@ -76,6 +78,8 @@ object Laporan {
         r.kalibrasi?.let { k ->
             sb.append("\n*Kalibrasi BJR*\n")
             sb.append("No. TPH : ${k.noTph}\n")
+            if (k.namaPemanen.isNotBlank()) sb.append("Nama Pemanen : ${k.namaPemanen}\n")
+            if (k.kodePemanen.isNotBlank()) sb.append("Kode Pemanen : ${k.kodePemanen}\n")
             sb.append("Jumlah Janjang : ${angka(k.janjang)} JJG\n")
             sb.append("Tonase : ${angka(k.tonaseKg)} Kg\n")
             sb.append("BJR : ${angka(k.bjr)} Kg\n")

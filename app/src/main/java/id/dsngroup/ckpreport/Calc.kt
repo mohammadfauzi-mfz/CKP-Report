@@ -31,6 +31,8 @@ data class GradingData(
     val brondol: Double,   // Brondol (Kg)
     val lat: Double = Double.NaN,   // koordinat TPH ini (NaN = belum ada)
     val lon: Double = Double.NaN,
+    val namaPemanen: String = "",
+    val kodePemanen: String = "",
 ) {
     val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
     val dinilai: Boolean get() = tonase > 0.0
@@ -49,6 +51,8 @@ data class KalibrasiData(
     val tonaseKg: Double,  // Tonase (Kg)
     val lat: Double = Double.NaN,   // koordinat TPH ini (NaN = belum ada)
     val lon: Double = Double.NaN,
+    val namaPemanen: String = "",
+    val kodePemanen: String = "",
 ) {
     val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
     val bjr: Double get() = if (janjang > 0.0) tonaseKg / janjang else 0.0 // =D30/D29

@@ -65,7 +65,7 @@ object Sync {
                     .put("lossesJjg", l.lossesJjg).put("total", l.total).put("perHa", l.perHa))
             }
             r.grading?.let { g ->
-                json.put("grading", JSONObject().put("noTph", g.noTph)
+                json.put("grading", JSONObject().put("noTph", g.noTph).put("namaPemanen", g.namaPemanen).put("kodePemanen", g.kodePemanen)
                     .put("ripe", g.ripe).put("mengkal", g.mengkal).put("mentah", g.mentah).put("overripe", g.overripe)
                     .put("total", g.total)
                     .put("pRipe", g.pct(g.ripe)).put("pMengkal", g.pct(g.mengkal))
@@ -74,7 +74,7 @@ object Sync {
                     .also { o -> if (g.hasCoord) o.put("lat", g.lat).put("lon", g.lon) })
             }
             r.kalibrasi?.let { k ->
-                json.put("kalibrasi", JSONObject().put("noTph", k.noTph).put("janjang", k.janjang)
+                json.put("kalibrasi", JSONObject().put("noTph", k.noTph).put("namaPemanen", k.namaPemanen).put("kodePemanen", k.kodePemanen).put("janjang", k.janjang)
                     .put("tonaseKg", k.tonaseKg).put("bjr", k.bjr)
                     .also { o -> if (k.hasCoord) o.put("lat", k.lat).put("lon", k.lon) })
             }
