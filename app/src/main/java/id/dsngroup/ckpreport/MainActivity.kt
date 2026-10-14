@@ -440,6 +440,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             // 1) Buat kolase (jika >1 foto) dan simpan dulu ke HP supaya tidak hilang walau tidak ada sinyal
             val id = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
             val dest = File(ReportStore.photoDir(app), "$id.jpg")
             if (!ImageUtil.collage(snapshot, dest)) {
                 runOnUiThread {
@@ -450,8 +451,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 return@Thread
             }
+            // Watermark: Blok | koordinat | Lux | tanggal & jam (satu baris di tepi bawah foto)
+            val luxTeks = if (luxVal >= 0) "${Laporan.angka(luxVal, 0)} Lux" else "Lux -"
+            val waktuTeks = java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale("in", "ID")).format(java.util.Date(now))
+            ImageUtil.watermark(dest, "Blok $blok  |  ${Laporan.koordinatSalin(lat, lon)}  |  $luxTeks  |  $waktuTeks")
             ReportStore.add(app, Report(
-                id = id, createdAt = System.currentTimeMillis(),
+                id = id, createdAt = now,
                 est = est, afd = afd, blok = blok, problem = problem,
                 lat = lat, lon = lon, pelapor = pelapor, photoPath = dest.path,
                 losses = losses, grading = grading, kalibrasi = kalibrasi, lux = luxVal, perbaikan = perbaikan,

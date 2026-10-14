@@ -111,6 +111,42 @@ object ImageUtil {
         }
     }
 
+    /**
+     * Tulis watermark satu baris (kiri ke kanan) di tepi paling bawah foto, memanjang selama lebar foto.
+     * Ukuran huruf otomatis dikecilkan agar seluruh teks muat dalam satu baris.
+     */
+    fun watermark(f: File, text: String): Boolean {
+        return try {
+            val src = BitmapFactory.decodeFile(f.path) ?: return false
+            val bmp = if (src.isMutable) src else src.copy(Bitmap.Config.ARGB_8888, true).also { src.recycle() }
+            val w = bmp.width.toFloat()
+            val h = bmp.height.toFloat()
+            val pad = w * 0.015f
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                textSize = w * 0.032f
+            }
+            val avail = w - 2 * pad
+            val tw = paint.measureText(text)
+            if (tw > avail) paint.textSize = paint.textSize * avail / tw
+            val fm = paint.fontMetrics
+            val textH = fm.descent - fm.ascent
+            val stripH = textH + pad
+            val canvas = Canvas(bmp)
+            val bg = Paint().apply { color = Color.argb(150, 0, 0, 0) }
+            canvas.drawRect(0f, h - stripH, w, h, bg)
+            canvas.drawText(text, pad, h - pad / 2f - fm.descent, paint)
+            FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            bmp.recycle()
+            true
+        } catch (e: Exception) {
+            false
+        } catch (e: OutOfMemoryError) {
+            false
+        }
+    }
+
     /** Gambar foto memenuhi kotak tujuan (dipotong di tengah, tanpa distorsi). */
     private fun drawCover(canvas: Canvas, f: File, dst: Rect, paint: Paint) {
         val b = BitmapFactory.Options().apply { inJustDecodeBounds = true }
