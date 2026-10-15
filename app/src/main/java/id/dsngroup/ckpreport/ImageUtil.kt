@@ -71,15 +71,16 @@ object ImageUtil {
      * 1 foto -> disalin apa adanya. 2+ foto -> dijadikan kolase (maks. 6):
      * 2: berdampingan, 3: 1 besar di atas + 2, 4: 2x2, 5: 2 + 3, 6: 3 + 3.
      */
-    fun collage(srcs: List<File>, out: File, width: Int = 1280): Boolean {
+    fun collage(srcs: List<File>, out: File, width: Int = 1280, extra: File? = null): Boolean {
         if (srcs.isEmpty()) return false
         return try {
-            if (srcs.size == 1) {
+            if (srcs.size == 1 && extra == null) {
                 srcs[0].copyTo(out, overwrite = true)
                 return true
             }
             val list = srcs.take(MAX_PHOTOS)
             val layout = when (list.size) {
+                1 -> listOf(1)
                 2 -> listOf(2)
                 3 -> listOf(1, 2)
                 4 -> listOf(2, 2)
@@ -88,7 +89,11 @@ object ImageUtil {
             }
             val rowH = if (layout.max() == 3) 480 else 640
             val gap = 6
-            val bmp = Bitmap.createBitmap(width, rowH * layout.size + gap * (layout.size - 1), Bitmap.Config.ARGB_8888)
+            // Baris terakhir (lebar penuh): tangkapan area tracking
+            val extraH = if (extra != null) 600 else 0
+            val rows = layout.size + (if (extra != null) 1 else 0)
+            val totalH = rowH * layout.size + extraH + gap * (rows - 1)
+            val bmp = Bitmap.createBitmap(width, totalH, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             canvas.drawColor(Color.WHITE)
             val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -100,6 +105,10 @@ object ImageUtil {
                     val top = r * (rowH + gap)
                     drawCover(canvas, list[idx++], Rect(left, top, left + cellW, top + rowH), paint)
                 }
+            }
+            if (extra != null) {
+                val top = layout.size * (rowH + gap)
+                drawCover(canvas, extra, Rect(0, top, width, top + extraH), paint)
             }
             FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
             bmp.recycle()

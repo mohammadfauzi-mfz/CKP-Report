@@ -112,6 +112,12 @@ class LuxCard(context: Context, private val prefs: SharedPreferences) : LinearLa
         refresh()
     }
 
+    /** Pulihkan nilai tersimpan (dari draf). */
+    fun restore(v: Double) {
+        saved = v
+        refresh()
+    }
+
     /** Kosongkan nilai tersimpan (dipakai setelah laporan selesai). */
     fun reset() {
         saved = -1.0

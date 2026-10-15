@@ -56,6 +56,12 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
             show()
         }
 
+        fun set(la: Double, lo: Double) {
+            lat = la
+            lon = lo
+            show()
+        }
+
         fun clear() {
             lat = Double.NaN
             lon = Double.NaN
@@ -311,6 +317,32 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
             if (!it.hasCoord) return "Kalibrasi BJR: koordinat belum ada. Tekan \"Ambil Koordinat Sekarang\""
         }
         return null
+    }
+
+    private fun s(v: Double) = if (v.isNaN() || v == 0.0) "" else if (v % 1.0 == 0.0) v.toLong().toString() else v.toString()
+
+    /** Isi form dari draf (activity yang tidak ada tetap tidak tercentang). */
+    fun load(l: LossesData?, g: GradingData?, k: KalibrasiData?) {
+        reset()
+        if (l != null) {
+            etAncak.setText(l.namaAncak)
+            etLuas.setText(s(l.luas)); etBrondol.setText(s(l.brondol)); etJanjang.setText(s(l.janjang)); etBjr.setText(s(l.bjr))
+            cbLosses.isChecked = true
+        }
+        if (g != null) {
+            etTphG.setText(g.noTph); etNamaG.setText(g.namaPemanen); etKodeG.setText(g.kodePemanen)
+            etRipe.setText(s(g.ripe)); etMengkal.setText(s(g.mengkal)); etMentah.setText(s(g.mentah)); etOverripe.setText(s(g.overripe))
+            etBjrG.setText(s(g.bjr)); etBrondolG.setText(s(g.brondol))
+            if (g.hasCoord) coordG.set(g.lat, g.lon)
+            cbGrading.isChecked = true
+        }
+        if (k != null) {
+            etTphK.setText(k.noTph); etNamaK.setText(k.namaPemanen); etKodeK.setText(k.kodePemanen)
+            etJjgK.setText(s(k.janjang)); etTonK.setText(s(k.tonaseKg))
+            if (k.hasCoord) coordK.set(k.lat, k.lon)
+            cbKal.isChecked = true
+        }
+        recalc()
     }
 
     fun reset() {

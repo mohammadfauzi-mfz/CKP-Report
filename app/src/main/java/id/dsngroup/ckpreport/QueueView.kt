@@ -17,7 +17,7 @@ import java.util.Date
 import java.util.Locale
 
 /** Daftar laporan: yang menunggu upload (antrean) dan yang sudah terupload. */
-class QueueView(context: Context) : LinearLayout(context) {
+class QueueView(context: Context, private val onEditDraft: (Draft) -> Unit = {}) : LinearLayout(context) {
 
     private val adapter = Adapter()
     private val tvEmpty = TextView(context)
@@ -30,7 +30,7 @@ class QueueView(context: Context) : LinearLayout(context) {
                 .apply { setMargins(dp(16), dp(12), dp(16), dp(4)) }
             setOnClickListener { uploadAll() }
         })
-        tvEmpty.text = "Belum ada laporan."
+        tvEmpty.text = "Belum ada laporan atau draf."
         tvEmpty.setPadding(dp(16), dp(16), dp(16), dp(16))
         addView(tvEmpty)
         addView(RecyclerView(context).apply {
@@ -46,7 +46,7 @@ class QueueView(context: Context) : LinearLayout(context) {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     fun refresh() {
-        adapter.items = ReportStore.all(context)
+        adapter.items = DraftStore.all(context) + ReportStore.all(context)
         adapter.notifyDataSetChanged()
         tvEmpty.visibility = if (adapter.items.isEmpty()) android.view.View.VISIBLE else android.view.View.GONE
     }
@@ -91,8 +91,56 @@ class QueueView(context: Context) : LinearLayout(context) {
             .show()
     }
 
+    private fun bindDraft(card: MaterialCardView, d: Draft) {
+        card.setCardBackgroundColor(0xFFE3F2FD.toInt())
+        val col = LinearLayout(card.context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(8))
+        }
+        col.addView(TextView(card.context).apply {
+            text = "📝 DRAF • ${d.est} • ${d.afd} • ${d.blok}"
+            textSize = 16f
+            setTypeface(null, Typeface.BOLD)
+        })
+        col.addView(TextView(card.context).apply {
+            text = "Disimpan " + SimpleDateFormat("dd MMM yyyy HH:mm", Locale("in", "ID")).format(Date(d.savedAt)) +
+                " • ${d.photos.size} foto" + if (d.trackId.isNotBlank() && d.attachTrack) " • + tracking" else ""
+            textSize = 12f
+            setTextColor(0xFF666666.toInt())
+        })
+        col.addView(TextView(card.context).apply {
+            text = "Belum dikirim. Tekan Edit & Kirim untuk mengoreksi lalu upload."
+            textSize = 13f
+            setTypeface(null, Typeface.BOLD)
+            setPadding(0, dp(4), 0, dp(4))
+        })
+        if (d.problem.isNotBlank()) col.addView(TextView(card.context).apply { text = d.problem; textSize = 14f; maxLines = 3 })
+        val row = LinearLayout(card.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(6), 0, 0)
+        }
+        fun btn(label: String, onClick: () -> Unit) = MaterialButton(
+            card.context, null, com.google.android.material.R.attr.materialButtonOutlinedStyle
+        ).apply {
+            text = label
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { setMargins(dp(2), 0, dp(2), 0) }
+            setOnClickListener { onClick() }
+        }
+        row.addView(btn("Edit & Kirim") { onEditDraft(d) })
+        row.addView(btn("Hapus") {
+            MaterialAlertDialogBuilder(context)
+                .setMessage("Hapus draf ini? Isian dan fotonya akan hilang.")
+                .setPositiveButton("Hapus") { _, _ -> DraftStore.remove(context, d.id); refresh() }
+                .setNegativeButton("Batal", null)
+                .show()
+        })
+        col.addView(row)
+        card.addView(col)
+    }
+
     private inner class Adapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-        var items: List<Report> = emptyList()
+        var items: List<Any> = emptyList()
         override fun getItemCount() = items.size
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -107,9 +155,11 @@ class QueueView(context: Context) : LinearLayout(context) {
         }
 
         override fun onBindViewHolder(h: RecyclerView.ViewHolder, position: Int) {
-            val r = items[position]
+            val item = items[position]
             val card = h.itemView as MaterialCardView
             card.removeAllViews()
+            if (item is Draft) { bindDraft(card, item); return }
+            val r = item as Report
             val pending = r.status == ST_PENDING
             card.setCardBackgroundColor(if (pending) 0xFFFFF3E0.toInt() else 0xFFE8F5E9.toInt())
 
