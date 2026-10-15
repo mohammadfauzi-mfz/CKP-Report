@@ -844,19 +844,54 @@ class MainActivity : AppCompatActivity() {
         return "Peta"
     }
 
-    private fun doImportMap(uri: Uri) {
+    private fun doImportMap(uri: Uri, manual: MapStore.Manual? = null) {
         val name = displayName(uri)
         val app = applicationContext
         toast("Mengimport peta... (bisa sampai 30 detik)")
         Thread {
-            val err = MapStore.import(app, uri, name)
+            val err = MapStore.import(app, uri, name, manual)
             runOnUiThread {
                 tvMapLabel?.text = mapLabel()
-                if (err == null) toast("Peta berhasil diimport: ${name.removeSuffix(".pdf")}")
-                else MaterialAlertDialogBuilder(this).setTitle("Import peta gagal").setMessage(err)
-                    .setPositiveButton("OK", null).show()
+                when {
+                    err == null -> { toast("Peta berhasil diimport: ${name.removeSuffix(".pdf")}"); peta.refresh() }
+                    err.startsWith("NOGEO:") -> askManualCalibration(uri, err.removePrefix("NOGEO:"))
+                    else -> MaterialAlertDialogBuilder(this).setTitle("Import peta gagal").setMessage(err)
+                        .setPositiveButton("OK", null).show()
+                }
             }
         }.start()
+    }
+
+    /** PDF tanpa koordinat yang bisa dibaca: tawarkan input koordinat 2 pojok secara manual (peta harus menghadap utara). */
+    private fun askManualCalibration(uri: Uri, detail: String) {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(20), dp(8), dp(20), 0)
+        col.addView(TextView(this).apply {
+            text = "$detail\n\nJika Anda tahu koordinat dua pojok peta (peta harus menghadap utara, tidak miring), isi di bawah. Format: lat,lon (mis. 0.746073,117.415342)."
+            textSize = 13f
+            setPadding(0, 0, 0, dp(8))
+        })
+        val (t1, e1) = inputField(this, "Pojok KIRI-ATAS (lat,lon)", InputType.TYPE_CLASS_TEXT)
+        val (t2, e2) = inputField(this, "Pojok KANAN-BAWAH (lat,lon)", InputType.TYPE_CLASS_TEXT)
+        col.addView(t1); col.addView(t2)
+        val sv = ScrollView(this)
+        sv.addView(col)
+        fun pair(s: String): Pair<Double, Double>? {
+            val p = s.trim().split(Regex("[,;\\s]+")).filter { it.isNotBlank() }
+            if (p.size != 2) return null
+            val a = parseNum(p[0]) ?: return null
+            val b = parseNum(p[1]) ?: return null
+            return if (Math.abs(a) <= 90 && Math.abs(b) <= 180) Pair(a, b) else null
+        }
+        MaterialAlertDialogBuilder(this).setTitle("Peta tidak berkoordinat").setView(sv)
+            .setPositiveButton("Pakai koordinat ini") { _, _ ->
+                val tl = pair(e1.text.toString())
+                val br = pair(e2.text.toString())
+                if (tl == null || br == null) toast("Format koordinat salah. Contoh: 0.746073,117.415342")
+                else doImportMap(uri, MapStore.Manual(tl.first, tl.second, br.first, br.second))
+            }
+            .setNegativeButton("Batal", null).show()
     }
 
     private fun doImportTracks(uri: Uri) {

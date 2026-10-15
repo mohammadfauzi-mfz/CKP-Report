@@ -65,7 +65,7 @@ object Laporan {
             sb.append("No TPH : ${g.noTph}\n")
             if (g.namaPemanen.isNotBlank()) sb.append("Nama Pemanen : ${g.namaPemanen}\n")
             if (g.kodePemanen.isNotBlank()) sb.append("Kode Pemanen : ${g.kodePemanen}\n")
-            sb.append("Ripe : ${angka(g.ripe)} JJG (${persen(g.pct(g.ripe))})\n")
+            sb.append("Ripe : ${angka(g.ripe)} JJG (${persen(g.pct(g.ripe))})" + (if (g.total > 0.0) " ${ikon(g.ripeBaik)}" else "") + "\n")
             sb.append("Mengkal : ${angka(g.mengkal)} JJG (${persen(g.pct(g.mengkal))})\n")
             sb.append("Mentah : ${angka(g.mentah)} JJG (${persen(g.pct(g.mentah))})\n")
             sb.append("Overripe : ${angka(g.overripe)} JJG (${persen(g.pct(g.overripe))})\n")

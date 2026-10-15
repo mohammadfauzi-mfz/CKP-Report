@@ -28,3 +28,26 @@ class MarkingTest {
         assertEquals(10000.0, Geo.areaM2(p), 50.0)
     }
 }
+
+class GeoTest {
+    @Test fun utmZona50() {
+        val (lat, lon) = GeoPdf.utmToLatLon(500000.0, 0.0, 50, false)
+        assertEquals(0.0, lat, 1e-6)
+        assertEquals(117.0, lon, 1e-6)
+    }
+
+    @Test fun affineMengembalikanTitikKontrol() {
+        val rows = listOf(
+            doubleArrayOf(0.0, 0.0, -1.0, 117.0), doubleArrayOf(0.0, 842.0, -0.9, 117.0),
+            doubleArrayOf(595.0, 842.0, -0.9, 117.1), doubleArrayOf(595.0, 0.0, -1.0, 117.1),
+        )
+        val f = Affine.fit(rows)!!
+        val m = MapInfo("a", "a", 1000, 1415, 595.0, 842.0, 0.0, 0.0, 117.0, -1.0, 595.0, 842.0, 117.1, -0.9, f)
+        val (lat, lon) = m.latLon(500.0, 707.5)
+        assertEquals(-0.95, lat, 1e-6)
+        assertEquals(117.05, lon, 1e-6)
+        val (x, y) = m.px(-0.95, 117.05)
+        assertEquals(500.0, x, 1e-3)
+        assertEquals(707.5, y, 1e-3)
+    }
+}

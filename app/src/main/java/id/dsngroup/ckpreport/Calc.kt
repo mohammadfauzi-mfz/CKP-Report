@@ -38,6 +38,8 @@ data class GradingData(
     val dinilai: Boolean get() = tonase > 0.0
     /** Brondol >= 5,00% = baik (dibandingkan setelah dibulatkan 2 desimal seperti yang tampil). */
     val baik: Boolean get() = Math.round(brondolPct * 10000.0) / 100.0 >= 5.0
+    /** Ripe >= 92,00% = baik (dibandingkan setelah dibulatkan 2 desimal seperti yang tampil). */
+    val ripeBaik: Boolean get() = Math.round(pct(ripe) * 10000.0) / 100.0 >= 92.0
     val total: Double get() = ripe + mengkal + mentah + overripe          // =SUM(D18:D21)
     fun pct(v: Double): Double = if (total > 0.0) v / total else 0.0       // =D18/$D$22
     val tonase: Double get() = bjr * total / 1000.0                       // =D23*D22/1000 (Ton)

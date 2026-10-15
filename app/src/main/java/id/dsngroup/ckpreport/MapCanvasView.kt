@@ -607,6 +607,7 @@ class MapCanvasView(context: Context) : View(context) {
             TileSrc("gmap", "Google Maps", "https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}", "© Google", 20),
             TileSrc("gsat", "Google Satelit", "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}", "© Google", 20),
             TileSrc("ghyb", "Google Hybrid", "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}", "© Google", 20),
+            TileSrc("esri", "Esri Satelit", "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "© Esri, Maxar, Earthstar Geographics", 19),
             TileSrc("osm", "OpenStreetMap", "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "© OpenStreetMap contributors", 19),
         )
 
