@@ -274,6 +274,15 @@ object MapStore {
 
 /** Pencocokan affine (kuadrat terkecil) dari titik kontrol [x, y, lat, lon] (koordinat halaman PDF). */
 object Affine {
+    /** True bila pemetaan (lon,lat) -> (x,y halaman) tercermin (determinan negatif); peta utara-atas normal = positif. */
+    fun mirrored(rows: List<DoubleArray>): Boolean {
+        val f = fit(rows)
+        if (f != null) return f[2] * f[6] - f[3] * f[5] < 0
+        val a = rows[0]
+        val b = rows.drop(1).firstOrNull { it[0] != a[0] && it[1] != a[1] && it[2] != a[2] && it[3] != a[3] } ?: return false
+        return (b[0] - a[0]) * (b[1] - a[1]) / ((b[3] - a[3]) * (b[2] - a[2])) < 0
+    }
+
     fun fit(rows: List<DoubleArray>): DoubleArray? {
         val n = rows.size
         if (n < 3) return null
@@ -460,21 +469,22 @@ object GeoPdf {
                     lp = if (gp.size == 8) listOf(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0) else continue
                 }
                 val vb = viewportBox(t, g.second)
-                val rows = ArrayList<DoubleArray>()
-                for (i in 0 until n) {
-                    val lx = lp[i * 2]
-                    val ly = lp[i * 2 + 1]
-                    val x: Double
-                    val y: Double
-                    if (vb != null) {
-                        x = vb[0] + lx * (vb[2] - vb[0]) - ox
-                        y = vb[1] + ly * (vb[3] - vb[1]) - oy
-                    } else if (bw != null && bh != null) {
-                        x = lx * bw
-                        y = ly * bh
-                    } else continue
-                    rows.add(doubleArrayOf(x, y, lat[i], lon[i]))
+                fun build(flipY: Boolean): List<DoubleArray> {
+                    val out = ArrayList<DoubleArray>()
+                    for (i in 0 until n) {
+                        val lx = lp[i * 2]
+                        val ly = if (flipY) 1.0 - lp[i * 2 + 1] else lp[i * 2 + 1]
+                        if (vb != null) {
+                            out.add(doubleArrayOf(vb[0] + lx * (vb[2] - vb[0]) - ox, vb[1] + ly * (vb[3] - vb[1]) - oy, lat[i], lon[i]))
+                        } else if (bw != null && bh != null) {
+                            out.add(doubleArrayOf(lx * bw, ly * bh, lat[i], lon[i]))
+                        }
+                    }
+                    return out
                 }
+                var rows = build(false)
+                // Peta tidak mungkin tercermin (mirror). Jika hasilnya tercermin, sumbu-Y LPTS file ini dihitung dari atas -> balik.
+                if (rows.size >= 2 && Affine.mirrored(rows)) rows = build(true)
                 if (rows.size >= 2) return Parsed(Result(rows, bw, bh, "ISO 32000"), null)
             }
         }
