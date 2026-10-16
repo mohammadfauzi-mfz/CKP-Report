@@ -83,6 +83,8 @@ class MapCanvasView(context: Context) : View(context) {
 
     /** Ganti peta. [bitmap] boleh null (latar polos). Tampilan diatur ulang agar pas di layar. */
     fun setMap(m: MapInfo, bitmap: Bitmap?) {
+        detail = null
+        detailGen++
         info = m
         bmp = bitmap
         fitted = false
@@ -223,7 +225,8 @@ class MapCanvasView(context: Context) : View(context) {
         return min(width.toFloat() / m.w, height.toFloat() / m.h) * 0.6f
     }
 
-    private fun maxScale() = 6f
+    var maxZoom = 6f
+    private fun maxScale() = maxZoom
 
     private fun sx(x: Float) = x * s + tx
     private fun sy(y: Float) = y * s + ty
@@ -249,7 +252,11 @@ class MapCanvasView(context: Context) : View(context) {
         val b = bmp
         val ts = tileSrc
         if (ts != null) { /* tile online digambar di bawah */ }
-        else if (b != null) c.drawBitmap(b, null, RectF(0f, 0f, m.w.toFloat(), m.h.toFloat()), imgPaint)
+        else if (b != null) {
+            c.drawBitmap(b, null, RectF(0f, 0f, m.w.toFloat(), m.h.toFloat()), imgPaint)
+            val dt = detail
+            if (dt != null) c.drawBitmap(dt, null, detailRect, imgPaint)
+        }
         else drawGrid(c, m)
         c.restore()
         if (ts != null) drawTiles(c, m, ts)
@@ -265,6 +272,65 @@ class MapCanvasView(context: Context) : View(context) {
         sel?.let { (x, y) -> drawCross(c, sx(x), sy(y)) }
         me?.let { (x, y, acc) -> drawMe(c, m, x, y, acc) }
         drawScaleBar(c, m)
+        removeCallbacks(hiRunnable)
+        if (needDetail()) postDelayed(hiRunnable, 300)
+    }
+
+    // ---------- detail resolusi tinggi (render ulang PDF saat zoom dekat) ----------
+
+    /** Penyedia gambar wilayah (x0,y0,x1,y1 dalam piksel peta, lebar, tinggi). Null = tidak tersedia. */
+    var hiRes: ((Float, Float, Float, Float, Int, Int) -> Bitmap?)? = null
+        set(v) {
+            field = v
+            detail = null
+            detailGen++
+            maxZoom = if (v != null) 28f else 6f
+            invalidate()
+        }
+    private var detail: Bitmap? = null
+    private val detailRect = RectF()
+    private var detailScale = 0f
+    private var detailGen = 0
+    private val hiPool = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val hiRunnable = Runnable { requestDetail() }
+
+    private fun needDetail(): Boolean {
+        if (hiRes == null || tileSrc != null || bmp == null || s <= 1.15f) return false
+        val d = detail ?: return true
+        val m = info ?: return false
+        val vx0 = max(0f, -tx / s); val vy0 = max(0f, -ty / s)
+        val vx1 = min(m.w.toFloat(), (width - tx) / s); val vy1 = min(m.h.toFloat(), (height - ty) / s)
+        val covered = vx0 >= detailRect.left - 1 && vy0 >= detailRect.top - 1 && vx1 <= detailRect.right + 1 && vy1 <= detailRect.bottom + 1
+        val scaleOk = Math.abs(Math.log((s / detailScale).toDouble())) < 0.35
+        return !(covered && scaleOk) && d.width > 0
+    }
+
+    private fun requestDetail() {
+        val m = info ?: return
+        val f = hiRes ?: return
+        if (width == 0) return
+        val mx = (width / s) * 0.15f
+        val my = (height / s) * 0.15f
+        val x0 = max(0f, -tx / s - mx); val y0 = max(0f, -ty / s - my)
+        val x1 = min(m.w.toFloat(), (width - tx) / s + mx); val y1 = min(m.h.toFloat(), (height - ty) / s + my)
+        if (x1 - x0 < 2f || y1 - y0 < 2f) return
+        var ow = ((x1 - x0) * s).toInt()
+        var oh = ((y1 - y0) * s).toInt()
+        val k = min(1f, min(2400f / ow, 2400f / oh))
+        ow = max(64, (ow * k).toInt()); oh = max(64, (oh * k).toInt())
+        val gen = ++detailGen
+        val sNow = s
+        hiPool.execute {
+            val b = try { f(x0, y0, x1, y1, ow, oh) } catch (e: Throwable) { null }
+            post {
+                if (gen == detailGen && b != null) {
+                    detail = b
+                    detailRect.set(x0, y0, x1, y1)
+                    detailScale = sNow
+                    invalidate()
+                }
+            }
+        }
     }
 
     // ---------- peta online (tile) ----------

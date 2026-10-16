@@ -89,12 +89,55 @@ data class MapInfo(
     }
 }
 
+/** Render ulang sebagian halaman PDF peta pada resolusi tinggi (dipakai saat zoom dekat). */
+class PdfRegion(private val file: File, private val m: MapInfo) {
+    private var pfd: ParcelFileDescriptor? = null
+    private var r: PdfRenderer? = null
+
+    /** Wilayah (x0,y0)-(x1,y1) dalam piksel peta -> bitmap ow x oh. */
+    @Synchronized
+    fun render(x0: Float, y0: Float, x1: Float, y1: Float, ow: Int, oh: Int): Bitmap? {
+        if (r == null) {
+            val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+            pfd = fd
+            r = PdfRenderer(fd)
+        }
+        val kx = m.pageW / m.w
+        val ky = m.pageH / m.h
+        val px0 = x0 * kx; val py0 = y0 * ky; val px1 = x1 * kx; val py1 = y1 * ky
+        if (px1 <= px0 || py1 <= py0) return null
+        val bmp = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+        bmp.eraseColor(Color.WHITE)
+        val sx = (ow / (px1 - px0)).toFloat()
+        val sy = (oh / (py1 - py0)).toFloat()
+        val mat = android.graphics.Matrix()
+        mat.setScale(sx, sy)
+        mat.postTranslate((-px0 * sx).toFloat(), (-py0 * sy).toFloat())
+        val page = r!!.openPage(0)
+        try {
+            page.render(bmp, null, mat, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        } finally {
+            page.close()
+        }
+        return bmp
+    }
+
+    @Synchronized
+    fun close() {
+        try { r?.close() } catch (e: Exception) {}
+        try { pfd?.close() } catch (e: Exception) {}
+        r = null; pfd = null
+    }
+}
+
 object MapStore {
     private val lock = Any()
 
     private fun dir(ctx: Context) = File(ctx.filesDir, "maps").apply { mkdirs() }
     private fun index(ctx: Context) = File(dir(ctx), "maps.json")
     fun imageFile(ctx: Context, id: String) = File(dir(ctx), "$id.jpg")
+    /** Salinan PDF asli (untuk render ulang detail saat zoom dekat). */
+    fun pdfFile(ctx: Context, id: String) = File(dir(ctx), "$id.pdf")
 
     fun toJson(m: MapInfo): JSONObject = JSONObject()
         .put("id", m.id).put("name", m.name).put("w", m.w).put("h", m.h).put("pw", m.pageW).put("ph", m.pageH)
@@ -182,6 +225,7 @@ object MapStore {
     fun remove(ctx: Context, id: String) = synchronized(lock) {
         val list = all(ctx).filter { it.id != id }
         imageFile(ctx, id).delete()
+        pdfFile(ctx, id).delete()
         save(ctx, list)
     }
 
@@ -258,8 +302,13 @@ object MapStore {
             synchronized(lock) {
                 // Nama sama -> ganti
                 val old = all(ctx).filter { it.name.equals(name, ignoreCase = true) }
-                old.forEach { imageFile(ctx, it.id).delete() }
+                old.forEach { imageFile(ctx, it.id).delete(); pdfFile(ctx, it.id).delete() }
                 save(ctx, all(ctx).filter { m -> old.none { it.id == m.id } } + info)
+                // simpan PDF asli agar zoom dekat bisa dirender tajam
+                val keep = pdfFile(ctx, id)
+                if (!tmp.renameTo(keep)) {
+                    try { tmp.copyTo(keep, overwrite = true) } catch (e: Exception) { keep.delete() }
+                }
             }
             return null
         } catch (e: OutOfMemoryError) {

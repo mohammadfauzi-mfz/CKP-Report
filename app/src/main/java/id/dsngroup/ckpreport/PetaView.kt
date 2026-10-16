@@ -76,6 +76,9 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     private var centeredOnce = false
     private var selected: Pair<Double, Double>? = null
     private var shown = false
+    private var followMe = false
+    private var hires: PdfRegion? = null
+    private lateinit var btnFollow: MaterialButton
 
     // riwayat
     private val historyList = LinearLayout(context)
@@ -222,6 +225,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         if (l.provider == LocationManager.GPS_PROVIDER) lastGps = now
         else if (now - lastGps < 15000L) return          // GPS masih segar: abaikan lokasi jaringan
         lastLoc = l
+        if (followMe) { selected = Pair(l.latitude, l.longitude) }
         val m = curMap
         if (m == null) {
             if (MapStore.all(context).isEmpty()) showMap(MapCanvasView.plainMap(l.latitude, l.longitude))
@@ -229,6 +233,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             return
         }
         canvas.setMe(l.latitude, l.longitude, if (l.hasAccuracy()) l.accuracy else 0f)
+        if (followMe) canvas.setSelected(l.latitude, l.longitude)
         if (!centeredOnce && m.contains(l.latitude, l.longitude)) {
             centeredOnce = true
             canvas.centerOn(l.latitude, l.longitude, zoomFor(m, 250.0))
@@ -271,6 +276,8 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         zoom.addView(round("+") { canvas.zoomBy(1.5f) })
         zoom.addView(round("−") { canvas.zoomBy(1f / 1.5f) })
         zoom.addView(round("◎") { ke("me") })
+        btnFollow = round("📌") { toggleFollow() }
+        zoom.addView(btnFollow)
         fr.addView(zoom, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL
         ).apply { rightMargin = dp(8) })
@@ -343,6 +350,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         val gen = ++loadGen
         if (m.id == "plain") {
             canvas.setMap(m, null)
+            setHiRes(null)
             afterMap()
             return
         }
@@ -352,6 +360,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 if (gen != loadGen) return@post
                 if (b == null) toast("Gambar peta tidak dapat dimuat (memori kurang / file rusak)")
                 canvas.setMap(m, b)
+                setHiRes(m)
                 afterMap()
             }
         }.start()
@@ -368,6 +377,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         onlineRef = Pair(lat, lon)
         canvas.tileSrc = src
         canvas.setMap(m, null)
+        setHiRes(null)
         btnMap.text = "🌐 ${src.name}"
         if (pending == null) canvas.centerOn(lat, lon, zoomFor(m, 300.0))
         afterMap()
@@ -439,6 +449,40 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             .setItems(names.toTypedArray()) { _, i -> acts[i]() }.show()
     }
 
+    private fun setFollow(on: Boolean) {
+        followMe = on
+        btnFollow.backgroundTintList = android.content.res.ColorStateList.valueOf(if (on) 0xFFFFB74D.toInt() else 0xE6FFFFFF.toInt())
+    }
+
+    /** Titik terpilih mengikuti posisi saya (untuk menandai tepat di posisi sendiri). */
+    private fun toggleFollow() {
+        if (followMe) {
+            setFollow(false)
+            toast("Titik terpilih tidak lagi mengikuti posisi saya")
+            updateInfo()
+            return
+        }
+        val l = lastLoc
+        if (l == null) { toast("Posisi GPS belum didapat"); return }
+        setFollow(true)
+        selected = Pair(l.latitude, l.longitude)
+        canvas.setSelected(l.latitude, l.longitude)
+        toast("Titik terpilih mengikuti posisi saya. Tekan Tandai untuk menandai di posisi Anda.")
+        updateInfo()
+    }
+
+    private fun setHiRes(m: MapInfo?) {
+        canvas.hiRes = null
+        hires?.close()
+        hires = null
+        if (m == null || m.id == "plain" || m.id == "online") return
+        val pf = MapStore.pdfFile(context, m.id)
+        if (!pf.exists()) return
+        val pr = PdfRegion(pf, m)
+        hires = pr
+        canvas.hiRes = { a, b, c, d, e, f -> pr.render(a, b, c, d, e, f) }
+    }
+
     private fun ke(what: String) {
         when (what) {
             "me" -> {
@@ -483,7 +527,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         }
         val s = selected
         if (canvas.mode == MapCanvasView.Mode.NORMAL) {
-            if (s != null) sb.append("\nTitik terpilih: ").append(Laporan.koordinatSalin(s.first, s.second)).append(" (ketuk teks untuk salin)")
+            if (s != null) sb.append("\nTitik terpilih").append(if (followMe) " (ikut posisi saya): " else ": ").append(Laporan.koordinatSalin(s.first, s.second)).append(" (ketuk teks untuk salin)")
         } else {
             sb.append("\n").append(measureText())
         }
@@ -500,11 +544,13 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     // ---- MapCanvasView.Listener ----
 
     override fun onMapTap(lat: Double, lon: Double) {
+        setFollow(false)
         selected = Pair(lat, lon)
         updateInfo()
     }
 
     override fun onMapLongPress(lat: Double, lon: Double) {
+        setFollow(false)
         selected = Pair(lat, lon)
         updateInfo()
         editor(null, lat, lon, null)
@@ -610,7 +656,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             items.add("📤 Share titik terpilih (WA)"); acts.add {
                 Share.text(context, "Koordinat: ${Laporan.koordinatSalin(s.first, s.second)}\n${Laporan.mapsUrl(s.first, s.second)}")
             }
-            items.add("Lepas titik terpilih"); acts.add { selected = null; canvas.clearSelected(); updateInfo() }
+            items.add("Lepas titik terpilih"); acts.add { setFollow(false); selected = null; canvas.clearSelected(); updateInfo() }
         }
         items.add(if (canvas.showHistory) "Sembunyikan riwayat jalur" else "Tampilkan riwayat jalur")
         acts.add { canvas.showHistory = !canvas.showHistory }

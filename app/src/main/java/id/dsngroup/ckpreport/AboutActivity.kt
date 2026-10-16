@@ -73,9 +73,9 @@ class AboutActivity : AppCompatActivity() {
 
         // Versi di bagian paling bawah
         val version = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.7"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "1.8"
         } catch (e: Exception) {
-            "1.7"
+            "1.8"
         }
         root.addView(TextView(this).apply {
             text = "Versi Aplikasi $version"

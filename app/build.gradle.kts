@@ -9,8 +9,8 @@ android {
         applicationId = "id.dsngroup.ckpreport"
         minSdk = 24
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.7"
+        versionCode = 7
+        versionName = "1.8"
     }
     buildTypes { release { isMinifyEnabled = false } }
     compileOptions {
