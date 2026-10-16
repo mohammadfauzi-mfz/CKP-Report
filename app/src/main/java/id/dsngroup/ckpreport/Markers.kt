@@ -20,6 +20,7 @@ data class Marker(
     val unit: String,
     val lat: Double,
     val lon: Double,
+    val photo: String = "",  // nama file foto berwatermark (kosong = tanpa foto)
 )
 
 data class MarkerIcon(val key: String, val emoji: String, val label: String)
@@ -45,15 +46,48 @@ object MarkerStore {
     private val lock = Any()
     private fun file(ctx: Context) = File(ctx.filesDir, "markers.json")
 
+    private fun photoDir(ctx: Context) = File(ctx.filesDir, "markphotos").apply { mkdirs() }
+    /** Foto berwatermark (dipakai untuk tampil & share). */
+    fun photoFile(ctx: Context, id: String) = File(photoDir(ctx), "$id.jpg")
+    /** Foto asli tanpa watermark (supaya watermark bisa dibuat ulang saat tanda diedit). */
+    fun rawFile(ctx: Context, id: String) = File(photoDir(ctx), "${id}_raw.jpg")
+
+    fun deletePhoto(ctx: Context, id: String) {
+        photoFile(ctx, id).delete(); rawFile(ctx, id).delete()
+    }
+
+    /** Teks watermark satu baris: judul | blok | volume | koordinat | tanggal jam. */
+    fun watermarkText(m: Marker): String = listOf(
+        m.title,
+        if (m.blok.isNotBlank()) "Blok ${m.blok}" else "",
+        MarkingText.volumeText(m),
+        Laporan.koordinatSalin(m.lat, m.lon),
+        MarkingText.tanggal(m.createdAt),
+    ).filter { it.isNotBlank() }.joinToString("  |  ")
+
+    /** Buat foto berwatermark dari foto asli. @return true bila berhasil. */
+    fun renderPhoto(ctx: Context, m: Marker): Boolean {
+        val raw = rawFile(ctx, m.id)
+        if (!raw.exists()) return false
+        val out = photoFile(ctx, m.id)
+        return try {
+            raw.copyTo(out, overwrite = true)
+            ImageUtil.watermark(out, watermarkText(m))
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun toJson(m: Marker) = JSONObject()
         .put("id", m.id).put("t", m.createdAt).put("icon", m.icon).put("title", m.title)
         .put("blok", m.blok).put("note", m.note).put("vol", m.volume).put("unit", m.unit)
-        .put("lat", m.lat).put("lon", m.lon)
+        .put("lat", m.lat).put("lon", m.lon).put("photo", m.photo)
 
     fun fromJson(o: JSONObject) = Marker(
         o.getString("id"), o.optLong("t"), o.optString("icon", "pin"), o.optString("title"),
         o.optString("blok"), o.optString("note"), o.optDouble("vol", 0.0), o.optString("unit"),
-        o.getDouble("lat"), o.getDouble("lon"),
+        o.getDouble("lat"), o.getDouble("lon"), o.optString("photo"),
     )
 
     private fun read(ctx: Context): MutableList<Marker> {
@@ -88,6 +122,7 @@ object MarkerStore {
         val list = read(ctx)
         list.removeAll { it.id == id }
         write(ctx, list)
+        deletePhoto(ctx, id)
     }
 
     /** @return jumlah tanda baru. */
@@ -102,11 +137,24 @@ object MarkerStore {
 
 /** Ekspor / impor database (tracking + tanda) dalam satu file JSON. */
 object DataIO {
-    fun exportAll(tracks: List<TrackRecord>, markers: List<Marker>): String {
+    /** Bila [ctx] diberikan, foto tanda ikut disertakan (base64) supaya cadangan lengkap. */
+    fun exportAll(tracks: List<TrackRecord>, markers: List<Marker>, ctx: Context? = null): String {
         val t = JSONArray()
         tracks.forEach { t.put(TrackStore.toJson(it)) }
         val m = JSONArray()
-        markers.forEach { m.put(MarkerStore.toJson(it)) }
+        for (mk in markers) {
+            val j = MarkerStore.toJson(mk)
+            if (ctx != null && mk.photo.isNotBlank()) {
+                try {
+                    val pf = MarkerStore.photoFile(ctx, mk.id)
+                    if (pf.exists()) j.put("photo64", android.util.Base64.encodeToString(pf.readBytes(), android.util.Base64.NO_WRAP))
+                    val rf = MarkerStore.rawFile(ctx, mk.id)
+                    if (rf.exists()) j.put("raw64", android.util.Base64.encodeToString(rf.readBytes(), android.util.Base64.NO_WRAP))
+                } catch (e: Exception) {
+                }
+            }
+            m.put(j)
+        }
         return JSONObject().put("app", "ckpreport").put("type", "data").put("version", 2)
             .put("tracks", t).put("markers", m).toString()
     }
@@ -128,7 +176,21 @@ object DataIO {
             val ma = o.optJSONArray("markers")
             if (ma != null) {
                 val list = ArrayList<Marker>()
-                for (i in 0 until ma.length()) list.add(MarkerStore.fromJson(ma.getJSONObject(i)))
+                val existing = MarkerStore.all(ctx).map { it.id }.toSet()
+                for (i in 0 until ma.length()) {
+                    val j = ma.getJSONObject(i)
+                    val mk = MarkerStore.fromJson(j)
+                    if (mk.id !in existing) {
+                        try {
+                            val p64 = j.optString("photo64")
+                            val r64 = j.optString("raw64")
+                            if (p64.isNotBlank()) MarkerStore.photoFile(ctx, mk.id).writeBytes(android.util.Base64.decode(p64, android.util.Base64.DEFAULT))
+                            if (r64.isNotBlank()) MarkerStore.rawFile(ctx, mk.id).writeBytes(android.util.Base64.decode(r64, android.util.Base64.DEFAULT))
+                        } catch (e: Exception) {
+                        }
+                    }
+                    list.add(if (mk.photo.isNotBlank() && !MarkerStore.photoFile(ctx, mk.id).exists()) mk.copy(photo = "") else mk)
+                }
                 nm = MarkerStore.merge(ctx, list)
             }
             Pair(nt, nm)

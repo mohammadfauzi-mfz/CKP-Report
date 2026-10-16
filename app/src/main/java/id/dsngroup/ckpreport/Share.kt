@@ -37,6 +37,23 @@ object Share {
         ctx.startActivity(Intent.createChooser(build(null), "Bagikan laporan"))
     }
 
+    /** Bagikan teks + foto (bila ada) ke WhatsApp. */
+    fun textWithPhoto(ctx: Context, teks: String, photo: File?) {
+        if (photo == null || !photo.exists()) { text(ctx, teks); return }
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", photo)
+        fun build(pkg: String?) = Intent(Intent.ACTION_SEND).apply {
+            type = "image/jpeg"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_TEXT, teks)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (pkg != null) setPackage(pkg)
+        }
+        for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+            try { ctx.startActivity(build(pkg)); return } catch (e: ActivityNotFoundException) {}
+        }
+        ctx.startActivity(Intent.createChooser(build(null), "Bagikan"))
+    }
+
     /** Bagikan teks ke WhatsApp (WA biasa -> WA Business -> pilihan aplikasi). */
     fun text(ctx: Context, teks: String) {
         fun build(pkg: String?) = Intent(Intent.ACTION_SEND).apply {

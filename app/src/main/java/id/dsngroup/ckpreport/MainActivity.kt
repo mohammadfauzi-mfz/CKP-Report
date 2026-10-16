@@ -109,6 +109,37 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) doImportTracks(uri)
     }
 
+    // ---- foto untuk tanda di tab Peta ----
+    private var markPhotoCb: ((File?) -> Unit)? = null
+    private val markCamera by lazy { File(photoDir, "mark_camera.jpg") }
+    private val takeMarkPhoto = registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
+        if (ok) finishMarkPhoto { FileInputStream(markCamera) } else markPhotoCb?.invoke(null)
+    }
+    private val pickMarkImage = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) finishMarkPhoto { contentResolver.openInputStream(uri) } else markPhotoCb?.invoke(null)
+    }
+
+    private fun pickMarkPhoto(camera: Boolean, cb: (File?) -> Unit) {
+        markPhotoCb = cb
+        if (camera) {
+            try {
+                markCamera.delete()
+                markCamera.createNewFile()
+                takeMarkPhoto.launch(FileProvider.getUriForFile(this, "$packageName.fileprovider", markCamera))
+            } catch (e: Exception) {
+                toast("Kamera tidak dapat dibuka: ${e.message}")
+            }
+        } else {
+            pickMarkImage.launch("image/*")
+        }
+    }
+
+    private fun finishMarkPhoto(open: () -> InputStream?) {
+        val f = File(photoDir, "m_${System.currentTimeMillis()}.jpg")
+        if (ImageUtil.prepare(open, f)) markPhotoCb?.invoke(f)
+        else { toast("Foto tidak dapat dibaca. Coba lagi."); markPhotoCb?.invoke(null) }
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -300,6 +331,7 @@ class MainActivity : AppCompatActivity() {
             override fun hasLocationPermission() = this@MainActivity.hasLocationPermission()
             override fun requestLocationPermission() { requestGps() }
             override fun defaultBlok() = etBlok.text.toString().trim()
+            override fun pickPhoto(camera: Boolean, onResult: (File?) -> Unit) { pickMarkPhoto(camera, onResult) }
         })
         peta.visibility = View.GONE
 

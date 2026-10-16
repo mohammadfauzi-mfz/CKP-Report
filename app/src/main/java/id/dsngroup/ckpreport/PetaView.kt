@@ -42,6 +42,8 @@ interface PetaHost {
     fun hasLocationPermission(): Boolean
     fun requestLocationPermission()
     fun defaultBlok(): String
+    /** Ambil foto (kamera / galeri), sudah diperkecil & diputar benar. Hasil null jika dibatalkan. */
+    fun pickPhoto(camera: Boolean, onResult: (File?) -> Unit)
 }
 
 /**
@@ -560,7 +562,17 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         val ic = MarkerIcons.of(m.icon)
         val l = lastLoc
         val jarak = if (l != null) "\nJarak dari Anda: " + Geo.meter(Geo.dist(TPoint(l.latitude, l.longitude, 0), TPoint(m.lat, m.lon, 0))) else ""
-        MaterialAlertDialogBuilder(context)
+        val pf = if (m.photo.isNotBlank()) MarkerStore.photoFile(context, m.id).takeIf { it.exists() } else null
+        val dlgB = MaterialAlertDialogBuilder(context)
+        if (pf != null) {
+            val iv = ImageView(context)
+            iv.adjustViewBounds = true
+            iv.scaleType = ImageView.ScaleType.FIT_CENTER
+            iv.setPadding(dp(16), dp(8), dp(16), 0)
+            iv.setImageBitmap(ImageUtil.thumb(pf, 900))
+            dlgB.setView(iv)
+        }
+        dlgB
             .setTitle("${ic.emoji} ${m.title}")
             .setMessage(
                 buildString {
@@ -575,7 +587,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 }
             )
             .setPositiveButton("Edit") { _, _ -> editor(m, m.lat, m.lon, null) }
-            .setNegativeButton("Share WA") { _, _ -> Share.text(context, MarkingText.pesan(m)) }
+            .setNegativeButton("Share WA") { _, _ -> Share.textWithPhoto(context, MarkingText.pesan(m), pf) }
             .setNeutralButton("Navigasi") { _, _ -> navigasi(m.lat, m.lon) }
             .show()
     }
@@ -803,6 +815,50 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         val hs2 = HorizontalScrollView(context)
         hs2.addView(chips)
         col.addView(hs2)
+
+        // ---- foto ----
+        var newRaw: File? = null
+        var removePhoto = false
+        val pv = ImageView(context)
+        pv.adjustViewBounds = true
+        pv.maxHeight = dp(200)
+        pv.scaleType = ImageView.ScaleType.FIT_CENTER
+        pv.visibility = View.GONE
+        val btnHapusFoto = btn("✕ Hapus foto") { }
+        fun showPrev() {
+            val f: File? = newRaw ?: if (!removePhoto && existing != null && existing.photo.isNotBlank()) {
+                MarkerStore.rawFile(context, existing.id).takeIf { it.exists() } ?: MarkerStore.photoFile(context, existing.id)
+            } else null
+            if (f != null && f.exists()) {
+                pv.setImageBitmap(ImageUtil.thumb(f, 600))
+                pv.visibility = View.VISIBLE
+                btnHapusFoto.visibility = View.VISIBLE
+            } else {
+                pv.setImageDrawable(null)
+                pv.visibility = View.GONE
+                btnHapusFoto.visibility = View.GONE
+            }
+        }
+        val photoRow = LinearLayout(context)
+        photoRow.orientation = HORIZONTAL
+        photoRow.setPadding(0, dp(10), 0, dp(4))
+        photoRow.addView(btn("📷 Kamera") {
+            host.pickPhoto(true) { f -> if (f != null) { newRaw = f; removePhoto = false; showPrev() } }
+        })
+        photoRow.addView(btn("🖼 Galeri") {
+            host.pickPhoto(false) { f -> if (f != null) { newRaw = f; removePhoto = false; showPrev() } }
+        })
+        btnHapusFoto.setOnClickListener { newRaw = null; removePhoto = true; showPrev() }
+        photoRow.addView(btnHapusFoto)
+        col.addView(photoRow)
+        col.addView(pv)
+        col.addView(TextView(context).apply {
+            text = "Foto otomatis diberi watermark (judul, blok, volume, koordinat, tanggal) saat disimpan."
+            textSize = 11f
+            setTextColor(0xFF777777.toInt())
+        })
+        showPrev()
+
         col.addView(TextView(context).apply {
             text = "Koordinat: ${Laporan.koordinatSalin(lat, lon)}"
             textSize = 12f
@@ -822,12 +878,25 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
             val title = etJ.text.toString().trim()
             if (title.isEmpty()) { tilJ.error = "Judul wajib diisi"; return@setOnClickListener }
-            val m = Marker(
-                existing?.id ?: UUID.randomUUID().toString(),
+            val id = existing?.id ?: UUID.randomUUID().toString()
+            var m = Marker(
+                id,
                 existing?.createdAt ?: System.currentTimeMillis(),
                 iconKey, title, etB.text.toString().trim().uppercase(), etK.text.toString().trim(),
                 etV.num(), etS.text.toString().trim(), lat, lon,
+                if (removePhoto) "" else (existing?.photo ?: ""),
             )
+            if (removePhoto) MarkerStore.deletePhoto(context, id)
+            val nr = newRaw
+            if (nr != null) {
+                try { nr.copyTo(MarkerStore.rawFile(context, id), overwrite = true); nr.delete(); m = m.copy(photo = "$id.jpg") } catch (e: Exception) { toast("Foto gagal disimpan") }
+            }
+            if (m.photo.isNotBlank()) {
+                if (MarkerStore.rawFile(context, id).exists()) {
+                    if (!MarkerStore.renderPhoto(context, m)) toast("Watermark foto gagal")
+                }
+                if (!MarkerStore.photoFile(context, id).exists()) m = m.copy(photo = "")
+            }
             MarkerStore.save(context, m)
             dlg.dismiss()
             toast("Tanda tersimpan")
@@ -881,7 +950,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         if (t.isEmpty() && m.isEmpty()) { toast("Belum ada data tracking / tanda"); return }
         try {
             val f = File(exportDir(), "ckp_database_peta_${stamp()}.json")
-            f.writeText(DataIO.exportAll(t, m))
+            f.writeText(DataIO.exportAll(t, m, context))
             Share.file(context, f, "application/json", "Bagikan database peta")
         } catch (e: Exception) {
             toast("Gagal membagikan: ${e.message}")
@@ -1160,10 +1229,21 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             setTextColor(0xFF777777.toInt())
             setPadding(0, dp(3), 0, dp(4))
         })
+        if (m.photo.isNotBlank()) {
+            val pf = MarkerStore.photoFile(context, m.id)
+            if (pf.exists()) col.addView(ImageView(context).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFFEEEEEE.toInt())
+                layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140)).apply { bottomMargin = dp(6) }
+                setImageBitmap(ImageUtil.thumb(pf, 640))
+            })
+        }
         val row = LinearLayout(context).apply { orientation = HORIZONTAL }
         row.addView(btn("Di Peta") { goTo(m.lat, m.lon) })
         row.addView(btn("Edit") { editor(m, m.lat, m.lon, null) })
-        row.addView(btn("Share") { Share.text(context, MarkingText.pesan(m)) })
+        row.addView(btn("Share") {
+            Share.textWithPhoto(context, MarkingText.pesan(m), if (m.photo.isNotBlank()) MarkerStore.photoFile(context, m.id) else null)
+        })
         row.addView(btn("Hapus") { hapusMarker(m) })
         col.addView(row)
         card.addView(col)
