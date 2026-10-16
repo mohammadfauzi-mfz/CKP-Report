@@ -926,7 +926,49 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Batal", null).show()
     }
 
+    private fun askBackup() {
+        MaterialAlertDialogBuilder(this).setTitle("Backup semua data")
+            .setMessage("Pilih isi backup. PDF peta asli berukuran besar dan hanya dipakai untuk zoom tajam; peta tetap bisa dipakai tanpa PDF.")
+            .setPositiveButton("Tanpa PDF peta (ringan)") { _, _ -> doBackup(false) }
+            .setNeutralButton("Dengan PDF peta (besar)") { _, _ -> doBackup(true) }
+            .setNegativeButton("Batal", null).show()
+    }
+
+    private fun doBackup(includePdf: Boolean) {
+        val app = applicationContext
+        toast("Menyiapkan backup... (bisa lama bila datanya banyak)")
+        Thread {
+            val dir = File(cacheDir, "exports").apply { mkdirs() }
+            val f = File(dir, "CKP_Backup_" + java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.US).format(java.util.Date()) + ".zip")
+            val ok = Backup.create(app, includePdf, f)
+            runOnUiThread {
+                if (ok) Share.file(this, f, "application/zip", "Simpan / kirim file backup (mis. ke Google Drive atau WhatsApp sendiri)")
+                else toast("Backup gagal dibuat")
+            }
+        }.start()
+    }
+
     private fun doImportTracks(uri: Uri) {
+        val isBk = try { contentResolver.openInputStream(uri)?.use { Backup.isBackup(it) } ?: false } catch (e: Exception) { false }
+        if (isBk) {
+            val app = applicationContext
+            toast("Memulihkan data...")
+            Thread {
+                val msg = try {
+                    contentResolver.openInputStream(uri)?.use { Backup.restore(app, it) } ?: "File tidak dapat dibuka."
+                } catch (e: Exception) { "Pemulihan gagal: ${e.message}" }
+                runOnUiThread {
+                    tvMapLabel?.text = mapLabel()
+                    tvPt.text = prefs.getString("pt", Laporan.DEFAULT_PT)
+                    peta.refresh()
+                    queue.refresh()
+                    updateBadge()
+                    MaterialAlertDialogBuilder(this).setTitle("Pulihkan data").setMessage(msg)
+                        .setPositiveButton("OK", null).show()
+                }
+            }.start()
+            return
+        }
         val bytes = try {
             contentResolver.openInputStream(uri)?.use { it.readBytes() }
         } catch (e: Exception) { null }
@@ -1023,6 +1065,27 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { confirmDeleteMap() }
         })
         f.addView(rowMap)
+
+        f.addView(section("Cadangan & Pemulihan Data"))
+        f.addView(TextView(this).apply {
+            text = "Backup menyimpan semua data (pengaturan, laporan, draf, tracking, tanda + foto, peta) ke satu file. Lakukan sebelum menghapus aplikasi, lalu Pulihkan setelah pasang ulang."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(6))
+        })
+        val rowBk = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowBk.addView(MaterialButton(this).apply {
+            text = "Backup Semua Data"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(4) }
+            setOnClickListener { askBackup() }
+        })
+        rowBk.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Pulihkan Data"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4) }
+            setOnClickListener { importTracks.launch(arrayOf("*/*")) }
+        })
+        f.addView(rowBk)
 
         val d = MaterialAlertDialogBuilder(this)
             .setTitle("Pengaturan")

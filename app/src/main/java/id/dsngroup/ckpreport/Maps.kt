@@ -217,6 +217,28 @@ object MapStore {
         }
     }
 
+    /** Gabungkan peta dari folder cadangan (maps.json + gambar). @return jumlah peta baru. */
+    fun mergeFromDir(ctx: Context, src: File): Int = synchronized(lock) {
+        val f = File(src, "maps.json")
+        if (!f.exists()) return 0
+        val a = try { JSONArray(f.readText()) } catch (e: Exception) { return 0 }
+        val list = all(ctx).toMutableList()
+        var added = 0
+        for (i in 0 until a.length()) {
+            val m = try { fromJson(a.getJSONObject(i)) } catch (e: Exception) { continue }
+            if (list.any { it.id == m.id || it.name.equals(m.name, ignoreCase = true) }) continue
+            val img = File(src, "${m.id}.jpg")
+            if (!img.exists()) continue
+            img.copyTo(imageFile(ctx, m.id), overwrite = true)
+            val pdf = File(src, "${m.id}.pdf")
+            if (pdf.exists()) pdf.copyTo(pdfFile(ctx, m.id), overwrite = true)
+            list.add(m)
+            added++
+        }
+        save(ctx, list)
+        added
+    }
+
     fun get(ctx: Context, id: String): MapInfo? = all(ctx).firstOrNull { it.id == id }
 
     /** Peta yang memuat titik ini (jika ada). */

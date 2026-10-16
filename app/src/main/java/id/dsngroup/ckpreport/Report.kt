@@ -121,6 +121,28 @@ object ReportStore {
         fire()
     }
 
+    /** Gabungkan laporan dari cadangan (id yang sudah ada dilewati). @return jumlah baru. */
+    fun mergeFromJson(ctx: Context, text: String, srcPhotos: File): Int {
+        var added = 0
+        synchronized(lock) {
+            val a = try { JSONArray(text) } catch (e: Exception) { return 0 }
+            val list = read(ctx)
+            for (i in 0 until a.length()) {
+                val r = try { fromJson(a.getJSONObject(i)) } catch (e: Exception) { continue }
+                if (list.any { it.id == r.id }) continue
+                val name = File(r.photoPath).name
+                val dest = File(photoDir(ctx), name)
+                val src = File(srcPhotos, name)
+                if (src.exists() && !dest.exists()) src.copyTo(dest)
+                list.add(r.copy(photoPath = dest.path))
+                added++
+            }
+            write(ctx, list)
+        }
+        fire()
+        return added
+    }
+
     private fun toJson(r: Report) = JSONObject()
         .put("id", r.id).put("t", r.createdAt)
         .put("est", r.est).put("afd", r.afd).put("blok", r.blok).put("problem", r.problem)

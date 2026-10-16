@@ -9,10 +9,25 @@ android {
         applicationId = "id.dsngroup.ckpreport"
         minSdk = 24
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.9"
+        versionCode = 9
+        versionName = "2.0"
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    // Kunci tanda tangan tetap: APK baru bisa dipasang menimpa versi lama tanpa uninstall (data aman).
+    signingConfigs {
+        create("ckp") {
+            storeFile = file("ckp.keystore")
+            storePassword = "ckpreport"
+            keyAlias = "ckp"
+            keyPassword = "ckpreport"
+        }
+    }
+    buildTypes {
+        getByName("debug") { signingConfig = signingConfigs.getByName("ckp") }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("ckp")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

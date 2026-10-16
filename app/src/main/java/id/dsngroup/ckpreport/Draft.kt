@@ -106,6 +106,23 @@ object DraftStore {
 
     fun get(ctx: Context, id: String): Draft? = synchronized(lock) { read(ctx).firstOrNull { it.id == id } }
 
+    /** Gabungkan draf dari cadangan (id yang sudah ada dilewati). @return jumlah baru. */
+    fun mergeFromJson(ctx: Context, text: String, srcDrafts: File): Int = synchronized(lock) {
+        val a = try { JSONArray(text) } catch (e: Exception) { return 0 }
+        val list = read(ctx)
+        var added = 0
+        for (i in 0 until a.length()) {
+            val d = try { fromJson(a.getJSONObject(i)) } catch (e: Exception) { continue }
+            if (list.any { it.id == d.id }) continue
+            val src = File(srcDrafts, d.id)
+            if (src.exists()) src.copyRecursively(dir(ctx, d.id), overwrite = true)
+            list.add(d)
+            added++
+        }
+        write(ctx, list)
+        added
+    }
+
     /** Simpan (atau timpa draf dengan id yang sama). */
     fun save(ctx: Context, d: Draft) = synchronized(lock) {
         val list = read(ctx)
