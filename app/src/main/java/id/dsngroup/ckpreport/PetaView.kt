@@ -926,6 +926,11 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         top.addView(btn("Share Database") { shareDatabase() })
         top.addView(btn("Share File Peta") { shareFilePeta() })
         historyPane.addView(top)
+        val top2 = LinearLayout(context)
+        top2.orientation = HORIZONTAL
+        top2.setPadding(dp(12), dp(2), dp(12), dp(2))
+        top2.addView(btn("Export GIS (KML, SHP, GPX, GeoJSON)") { exportGis(MarkerStore.all(context), TrackStore.all(context), "semua tanda & tracking") })
+        historyPane.addView(top2)
         historyPane.addView(TextView(context).apply {
             text = "Tracking, tanda, dan peta tersimpan di HP dan tidak ikut diupload. Share Database = cadangan tracking + tanda (file .json). Share File Peta = peta offline untuk HP lain. Import menerima keduanya."
             textSize = 12f
@@ -1132,6 +1137,11 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         acts.addView(btn("Export CSV") { shareCsv() })
         acts.addView(btn("Share Database") { shareDatabase() })
         rekapPane.addView(acts)
+        val acts2 = LinearLayout(context)
+        acts2.orientation = HORIZONTAL
+        acts2.setPadding(dp(12), 0, dp(12), 0)
+        acts2.addView(btn("Export GIS (KML, SHP, GPX, GeoJSON)") { exportGis(rekapShown, emptyList(), "tanda yang tampil") })
+        rekapPane.addView(acts2)
 
         tvRekapInfo.textSize = 13f
         tvRekapInfo.setTypeface(null, Typeface.BOLD)
@@ -1254,6 +1264,26 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         val list = rekapShown
         if (list.isEmpty()) { toast("Tidak ada tanda untuk dibagikan"); return }
         Share.text(context, MarkingText.rekap(list))
+    }
+
+    /** Export ke format GIS (QGIS / ArcGIS / Google Earth / Avenza). */
+    private fun exportGis(markers: List<Marker>, tracks: List<TrackRecord>, label: String) {
+        if (markers.isEmpty() && tracks.none { it.points.size >= 2 }) { toast("Belum ada data untuk diexport"); return }
+        val fm = Gis.Format.values()
+        MaterialAlertDialogBuilder(context)
+            .setTitle("Export $label (${markers.size} tanda, ${tracks.count { it.points.size >= 2 }} tracking)")
+            .setItems(fm.map { it.label }.toTypedArray()) { _, i ->
+                val format = fm[i]
+                val app = context
+                Thread {
+                    val f = try { Gis.export(app, format, markers, tracks, exportDir()) } catch (e: Exception) { null }
+                    post {
+                        if (f != null) Share.file(app, f, format.mime, "Bagikan ${format.ext.uppercase()}")
+                        else toast("Gagal membuat file export")
+                    }
+                }.start()
+            }
+            .setNegativeButton("Batal", null).show()
     }
 
     private fun shareCsv() {
