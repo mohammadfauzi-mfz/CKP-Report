@@ -16,6 +16,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
@@ -88,18 +89,29 @@ object Tracker {
     @Volatile var active = false
     @Volatile var startedAt = 0L
     @Volatile var gpsError: String? = null
+    @Volatile var lastFixAt = 0L
+    @Volatile var est = ""
+    @Volatile var afd = ""
+    @Volatile var blok = ""
     private val pts = ArrayList<TPoint>()
+    private var lastSave = 0L
 
-    fun start() {
+    private fun file(ctx: Context) = File(ctx.filesDir, "active_track.json")
+
+    fun start(ctx: Context? = null, est: String = "", afd: String = "", blok: String = "") {
         synchronized(pts) { pts.clear() }
         startedAt = System.currentTimeMillis()
         gpsError = null
+        lastFixAt = 0L
+        this.est = est; this.afd = afd; this.blok = blok
         active = true
+        if (ctx != null) save(ctx, true)
     }
 
     /** Hentikan dan kembalikan titik-titik yang terkumpul. */
-    fun stop(): List<TPoint> {
+    fun stop(ctx: Context? = null): List<TPoint> {
         active = false
+        if (ctx != null) discard(ctx)
         return snapshot()
     }
 
@@ -110,21 +122,120 @@ object Tracker {
             val last = pts.lastOrNull()
             if (last == null || Geo.dist(last, p) >= 3.0) pts.add(p)   // abaikan getaran GPS < 3 m
         }
+        lastFixAt = System.currentTimeMillis()
+    }
+
+    /** Simpan keadaan tracking ke file agar bisa dipulihkan bila aplikasi/service terbunuh sistem. */
+    fun save(ctx: Context, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastSave < 15000L) return
+        lastSave = now
+        try {
+            val a = JSONArray()
+            for (p in snapshot()) a.put(JSONArray().put(p.lat).put(p.lon).put(p.t))
+            val o = JSONObject().put("start", startedAt).put("est", est).put("afd", afd).put("blok", blok).put("pts", a)
+            val tmp = File(ctx.filesDir, "active_track.tmp")
+            tmp.writeText(o.toString())
+            tmp.renameTo(file(ctx))
+        } catch (e: Exception) {
+            CrashLog.error(ctx, "Tracker.save", e)
+        }
+    }
+
+    fun discard(ctx: Context) {
+        try { file(ctx).delete() } catch (e: Exception) {}
+    }
+
+    /** Ada tracking yang terputus (aplikasi/service terbunuh) dan belum diselesaikan? */
+    fun pendingRecovery(ctx: Context): TrackRecord? {
+        if (active) return null
+        return readSaved(ctx)
+    }
+
+    private fun readSaved(ctx: Context): TrackRecord? {
+        val f = file(ctx)
+        if (!f.exists()) return null
+        return try {
+            val o = JSONObject(f.readText())
+            val a = o.optJSONArray("pts") ?: JSONArray()
+            val list = ArrayList<TPoint>()
+            for (i in 0 until a.length()) {
+                val p = a.optJSONArray(i) ?: continue
+                list.add(TPoint(p.getDouble(0), p.getDouble(1), p.optLong(2)))
+            }
+            if (list.isEmpty()) { f.delete(); return null }
+            val st = o.optLong("start")
+            TrackRecord("recovered", st, list.last().t.coerceAtLeast(st), o.optString("est"), o.optString("afd"), o.optString("blok"), "", list)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Lanjutkan tracking dari file simpanan (titik lama dipertahankan). */
+    fun resume(ctx: Context): Boolean {
+        val r = readSaved(ctx) ?: return false
+        synchronized(pts) { pts.clear(); pts.addAll(r.points) }
+        startedAt = r.startedAt
+        est = r.est; afd = r.afd; blok = r.blok
+        gpsError = null
+        lastFixAt = 0L
+        active = true
+        return true
     }
 }
 
 /** Service latar depan: tracking tetap berjalan walau layar mati / aplikasi dibuka-tutup. */
 class TrackingService : Service(), LocationListener {
     private var lm: LocationManager? = null
+    private var wake: PowerManager.WakeLock? = null
+    private var nm: NotificationManager? = null
+    private var lastNotif = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // intent == null: service dihidupkan ulang oleh sistem setelah terbunuh -> pulihkan dari file
+        if (!Tracker.active) {
+            if (Tracker.resume(this)) CrashLog.event(this, "Tracking dipulihkan otomatis setelah service terbunuh (${Tracker.snapshot().size} titik)")
+            else { stopSelf(); return START_NOT_STICKY }
+        }
         val n = buildNotification()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        else startForeground(NOTIF_ID, n)
+        try {
+            if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            else startForeground(NOTIF_ID, n)
+        } catch (e: Exception) {
+            CrashLog.error(this, "startForeground", e)
+            Tracker.gpsError = "Sistem menolak tracking di latar belakang: ${e.message}"
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        acquireWake()
         startUpdates()
-        return START_NOT_STICKY
+        CrashLog.event(this, "Service tracking berjalan (intent=${if (intent == null) "restart sistem" else "start"})")
+        return START_STICKY
+    }
+
+    private fun acquireWake() {
+        try {
+            if (wake?.isHeld == true) return
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wake = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "ckpreport:tracking").apply {
+                setReferenceCounted(false)
+                acquire(12 * 60 * 60 * 1000L)
+            }
+        } catch (e: Exception) {
+            CrashLog.error(this, "wakelock", e)
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        CrashLog.event(this, "Aplikasi digeser dari daftar terbaru (service tetap jalan: ${Tracker.active})")
+        super.onTaskRemoved(rootIntent)
+    }
+
+    override fun onLowMemory() {
+        CrashLog.event(this, "Sistem melaporkan memori rendah")
+        super.onLowMemory()
     }
 
     private fun buildNotification(): Notification {
@@ -136,9 +247,11 @@ class TrackingService : Service(), LocationListener {
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val pts = Tracker.snapshot()
         return NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle("Tracking CKP aktif")
-            .setContentText("Merekam jalur dengan GPS. Buka aplikasi lalu tekan Stop Tracking untuk selesai.")
+            .setContentText("${pts.size} titik • ${Geo.km(Geo.length(pts))}. Buka aplikasi lalu tekan Stop Tracking untuk selesai.")
+            .setOnlyAlertOnce(true)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(open)
@@ -164,15 +277,26 @@ class TrackingService : Service(), LocationListener {
         if (!Tracker.active) return
         if (location.hasAccuracy() && location.accuracy > 35f) return   // abaikan titik yang kurang akurat
         Tracker.add(TPoint(location.latitude, location.longitude, System.currentTimeMillis()))
+        Tracker.save(this)
+        val now = System.currentTimeMillis()
+        if (now - lastNotif > 30000L) {
+            lastNotif = now
+            try { (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, buildNotification()) } catch (e: Exception) {}
+        }
     }
 
     override fun onProviderEnabled(provider: String) {}
-    override fun onProviderDisabled(provider: String) {}
+    override fun onProviderDisabled(provider: String) {
+        if (provider == LocationManager.GPS_PROVIDER) CrashLog.event(this, "GPS HP dimatikan saat tracking")
+    }
     @Deprecated("Deprecated in Java")
     override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
 
     override fun onDestroy() {
+        CrashLog.event(this, "Service tracking berhenti (tracking aktif=${Tracker.active})")
+        if (Tracker.active) Tracker.save(this, true)   // dihentikan sistem: simpan agar bisa dipulihkan
         try { lm?.removeUpdates(this) } catch (e: Exception) {}
+        try { if (wake?.isHeld == true) wake?.release() } catch (e: Exception) {}
         super.onDestroy()
     }
 

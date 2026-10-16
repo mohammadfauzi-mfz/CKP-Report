@@ -54,7 +54,9 @@ object Gis {
                 val v = MarkingText.volumeText(m)
                 if (v.isNotBlank()) html.append("<tr><td><b>Volume</b></td><td>${xml(v)}</td></tr>")
                 if (m.note.isNotBlank()) html.append("<tr><td><b>Keterangan</b></td><td>${xml(m.note)}</td></tr>")
-                html.append("<tr><td><b>Tanggal</b></td><td>${xml(MarkingText.tanggal(m.createdAt))}</td></tr></table>")
+                html.append("<tr><td><b>Tanggal</b></td><td>${xml(MarkingText.tanggal(m.createdAt))}</td></tr>")
+                if (m.acc >= 0.0) html.append("<tr><td><b>Akurasi GPS</b></td><td>${xml(MarkingText.accText(m))}</td></tr>")
+                html.append("</table>")
                 if (ph != null) html.append("<br/><img src=\"${xml(ph)}\" width=\"400\"/>")
                 sb.append("<Placemark><name>${xml(m.title)}</name>")
                 sb.append("<description><![CDATA[${html.toString().replace("]]>", "]]&gt;")}]]></description>")
@@ -65,6 +67,7 @@ object Gis {
                 sb.append("<Data name=\"keterangan\"><value>${xml(m.note)}</value></Data>")
                 sb.append("<Data name=\"volume\"><value>${d6(m.volume)}</value></Data>")
                 sb.append("<Data name=\"satuan\"><value>${xml(m.unit)}</value></Data>")
+                if (m.acc >= 0.0) sb.append("<Data name=\"akurasi_m\"><value>${d6(m.acc)}</value></Data>")
                 sb.append("</ExtendedData>")
                 sb.append("<Point><coordinates>${d6(m.lon)},${d6(m.lat)},0</coordinates></Point></Placemark>\n")
             }
@@ -97,6 +100,7 @@ object Gis {
             val ic = MarkerIcons.of(m.icon)
             val desc = listOf(
                 ic.label, if (m.blok.isNotBlank()) "Blok ${m.blok}" else "", MarkingText.volumeText(m), m.note,
+                if (m.acc >= 0.0) "Akurasi ${MarkingText.accText(m)}" else "",
             ).filter { it.isNotBlank() }.joinToString("; ")
             sb.append("<wpt lat=\"${d6(m.lat)}\" lon=\"${d6(m.lon)}\"><time>${iso(m.createdAt)}</time>")
             sb.append("<name>${xml(m.title)}</name><desc>${xml(desc)}</desc><sym>${xml(ic.label)}</sym></wpt>\n")
@@ -134,7 +138,7 @@ object Gis {
             feats.add(
                 "{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${d6(m.lon)},${d6(m.lat)}]}," +
                     "\"properties\":{\"jenis\":\"tanda\",\"judul\":${js(m.title)},\"kategori\":${js(ic.label)},\"blok\":${js(m.blok)}," +
-                    "\"keterangan\":${js(m.note)},\"volume\":${d6(m.volume)},\"satuan\":${js(m.unit)},\"tanggal\":${js(iso(m.createdAt))}}}"
+                    "\"keterangan\":${js(m.note)},\"volume\":${d6(m.volume)},\"satuan\":${js(m.unit)},\"tanggal\":${js(iso(m.createdAt))},\"akurasi_m\":${if (m.acc >= 0.0) d6(m.acc) else "null"}}}"
             )
         }
         for (r in tracks) {
@@ -258,11 +262,11 @@ object Gis {
                 val f = listOf(
                     Field("JUDUL", 'C', 100), Field("KATEGORI", 'C', 30), Field("BLOK", 'C', 20), Field("KETERANGAN", 'C', 254),
                     Field("VOLUME", 'N', 18, 3), Field("SATUAN", 'C', 20), Field("TANGGAL", 'C', 20),
-                    Field("LAT", 'N', 14, 7), Field("LON", 'N', 14, 7),
+                    Field("LAT", 'N', 14, 7), Field("LON", 'N', 14, 7), Field("AKURASI_M", 'N', 8, 1),
                 )
                 put(z, "ckp_tanda.dbf", dbf(f, markers.map {
                     listOf(it.title, MarkerIcons.of(it.icon).label, it.blok, it.note, String.format(Locale.US, "%.3f", it.volume), it.unit,
-                        iso(it.createdAt), d6(it.lat), d6(it.lon))
+                        iso(it.createdAt), d6(it.lat), d6(it.lon), if (it.acc >= 0.0) String.format(Locale.US, "%.1f", it.acc) else "")
                 }))
                 put(z, "ckp_tanda.prj", PRJ.toByteArray()); put(z, "ckp_tanda.cpg", "UTF-8".toByteArray())
             }

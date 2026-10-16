@@ -21,6 +21,7 @@ data class Marker(
     val lat: Double,
     val lon: Double,
     val photo: String = "",  // nama file foto berwatermark (kosong = tanpa foto)
+    val acc: Double = -1.0,  // akurasi GPS saat ditandai, meter (-1 = tidak diketahui / dipilih manual di peta)
 )
 
 data class MarkerIcon(val key: String, val emoji: String, val label: String)
@@ -82,12 +83,12 @@ object MarkerStore {
     fun toJson(m: Marker) = JSONObject()
         .put("id", m.id).put("t", m.createdAt).put("icon", m.icon).put("title", m.title)
         .put("blok", m.blok).put("note", m.note).put("vol", m.volume).put("unit", m.unit)
-        .put("lat", m.lat).put("lon", m.lon).put("photo", m.photo)
+        .put("lat", m.lat).put("lon", m.lon).put("photo", m.photo).put("acc", m.acc)
 
     fun fromJson(o: JSONObject) = Marker(
         o.getString("id"), o.optLong("t"), o.optString("icon", "pin"), o.optString("title"),
         o.optString("blok"), o.optString("note"), o.optDouble("vol", 0.0), o.optString("unit"),
-        o.getDouble("lat"), o.getDouble("lon"), o.optString("photo"),
+        o.getDouble("lat"), o.getDouble("lon"), o.optString("photo"), o.optDouble("acc", -1.0),
     )
 
     private fun read(ctx: Context): MutableList<Marker> {
@@ -206,6 +207,11 @@ object MarkingText {
 
     fun tanggal(t: Long): String = SimpleDateFormat("dd MMM yyyy HH:mm", idn).format(Date(t))
 
+    /** Batas akurasi GPS yang dianggap baik untuk penandaan (meter). */
+    const val ACC_OK = 15.0
+
+    fun accText(m: Marker): String = if (m.acc < 0.0) "" else "±" + Laporan.angka(m.acc, 0) + " m"
+
     fun volumeText(m: Marker): String =
         if (m.volume == 0.0 && m.unit.isBlank()) "" else (Laporan.angka(m.volume, 3) + " " + m.unit).trim()
 
@@ -218,7 +224,9 @@ object MarkingText {
         if (v.isNotBlank()) append("Volume : $v\n")
         if (m.note.isNotBlank()) append("Keterangan : ${m.note}\n")
         append("Tanggal : ${tanggal(m.createdAt)}\n\n")
-        append("Koordinat : ${Laporan.koordinatSalin(m.lat, m.lon)}\n")
+        append("Koordinat : ${Laporan.koordinatSalin(m.lat, m.lon)}")
+        if (m.acc >= 0.0) append(" (${accText(m)}${if (m.acc > ACC_OK) " ⚠️" else ""})")
+        append("\n")
         append("Google Maps : ${Laporan.mapsUrl(m.lat, m.lon)}")
     }
 
@@ -260,11 +268,11 @@ object MarkingText {
     /** CSV (pemisah titik-koma, desimal koma) agar langsung terbuka rapi di Excel Indonesia. */
     fun csv(list: List<Marker>): String = buildString {
         append('﻿')
-        append("Tanggal;Kategori;Judul;Blok;Keterangan;Volume;Satuan;Latitude;Longitude\n")
+        append("Tanggal;Kategori;Judul;Blok;Keterangan;Volume;Satuan;Latitude;Longitude;Akurasi_m\n")
         for (m in list) {
             append(listOf(
                 q(tanggal(m.createdAt)), q(MarkerIcons.of(m.icon).label), q(m.title), q(m.blok), q(m.note),
-                dec(m.volume), q(m.unit), dec(m.lat), dec(m.lon),
+                dec(m.volume), q(m.unit), dec(m.lat), dec(m.lon), if (m.acc >= 0.0) dec(m.acc) else "",
             ).joinToString(";")).append('\n')
         }
     }

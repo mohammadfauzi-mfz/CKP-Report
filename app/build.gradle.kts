@@ -9,8 +9,8 @@ android {
         applicationId = "id.dsngroup.ckpreport"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.1"
+        versionCode = 11
+        versionName = "2.2"
     }
     // Kunci tanda tangan tetap: APK baru bisa dipasang menimpa versi lama tanpa uninstall (data aman).
     signingConfigs {
@@ -41,4 +41,5 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.work:work-runtime:2.9.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20231013")
 }

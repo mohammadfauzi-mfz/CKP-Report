@@ -141,6 +141,14 @@ class MapCanvasView(context: Context) : View(context) {
 
     fun clearMe() { me = null; invalidate() }
 
+    /** Arah hadap HP (derajat dari utara, searah jarum jam); null = sembunyikan kerucut arah. */
+    private var heading: Float? = null
+    fun setHeading(deg: Float?) {
+        if (heading == deg) return
+        heading = deg
+        if (me != null) invalidate()
+    }
+
     fun setSelected(lat: Double, lon: Double) {
         val m = info ?: return
         val (x, y) = m.px(lat, lon)
@@ -449,6 +457,13 @@ class MapCanvasView(context: Context) : View(context) {
                 fill.color = 0x221E88E5; c.drawCircle(px, py, r, fill)
                 stroke.color = 0x661E88E5; stroke.strokeWidth = d(1f); c.drawCircle(px, py, r, stroke)
             }
+        }
+        heading?.let { h ->
+            // kerucut arah hadap (0 derajat = utara peta)
+            val len = d(34f)
+            val oval = android.graphics.RectF(px - len, py - len, px + len, py + len)
+            fill.color = 0x551E88E5
+            c.drawArc(oval, h - 90f - 28f, 56f, true, fill)
         }
         dot(c, px, py, 0xFF1E88E5.toInt(), d(8f))
     }

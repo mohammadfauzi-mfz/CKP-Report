@@ -367,6 +367,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (prefs.getString("url", "").isNullOrBlank()) showSettings()
         if (savedInstanceState == null && !hasLocationPermission()) requestGps()
+        if (savedInstanceState == null) root.post { checkRecoveryAndCrash() }
     }
 
     override fun onStart() {
@@ -688,7 +689,9 @@ class MainActivity : AppCompatActivity() {
                 return
             }
             val pts = Tracker.snapshot()
-            tvTrackInfo.text = "● Tracking aktif • ${pts.size} titik • ${Geo.km(Geo.length(pts))}"
+            val gap = if (Tracker.lastFixAt > 0) (System.currentTimeMillis() - Tracker.lastFixAt) / 1000 else -1L
+            val warn = if (gap > 60) "\n⚠ Tidak ada titik GPS baru ${gap} dtk (sinyal lemah / GPS mati?)" else ""
+            tvTrackInfo.text = "● Tracking aktif • ${pts.size} titik • ${Geo.km(Geo.length(pts))}$warn"
             renderPreview(pts, null)
             trackHandler.postDelayed(this, 2000)
         }
@@ -704,13 +707,20 @@ class MainActivity : AppCompatActivity() {
             requestGps()
             return
         }
-        Tracker.start()
+        Tracker.start(this, etEst.text.toString().trim(), etAfd.text.toString().trim(), etBlok.text.toString().trim())
         try {
             ContextCompat.startForegroundService(this, Intent(this, TrackingService::class.java))
         } catch (e: Exception) {
-            Tracker.stop()
+            Tracker.stop(this)
+            CrashLog.error(this, "startTracking", e)
             toast("Tracking tidak dapat dimulai: ${e.message}")
             return
+        }
+        CrashLog.event(this, "Tracking dimulai oleh pengguna")
+        askNotifPermissionOnce()
+        if (!prefs.getBoolean("batt_guide", false)) {
+            prefs.edit().putBoolean("batt_guide", true).apply()
+            showBatteryGuide()
         }
         lastTrack = null
         cbTrack.visibility = View.GONE
@@ -724,7 +734,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cancelTracking() {
-        Tracker.stop()
+        Tracker.stop(this)
         stopService(Intent(this, TrackingService::class.java))
         trackHandler.removeCallbacks(trackTick)
         if (lastTrack == null) trackBox.visibility = View.GONE
@@ -732,7 +742,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopTracking() {
-        val pts = Tracker.stop()
+        val pts = Tracker.stop(this)
+        CrashLog.event(this, "Tracking dihentikan pengguna (${pts.size} titik)")
         stopService(Intent(this, TrackingService::class.java))
         trackHandler.removeCallbacks(trackTick)
         if (pts.size < 2) {
@@ -758,6 +769,114 @@ class MainActivity : AppCompatActivity() {
             if (mapId.isEmpty()) "Tracking tersimpan di tab Peta (lokasi di luar peta offline / peta belum diimport)"
             else "Tracking tersimpan di tab Peta"
         )
+    }
+
+    /** Android 13+: tanpa izin notifikasi, penanda tracking di status bar tidak tampil (service lebih mudah dimatikan). */
+    private fun askNotifPermissionOnce() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        if (prefs.getBoolean("notif_asked", false)) return
+        prefs.edit().putBoolean("notif_asked", true).apply()
+        permReq.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+    }
+
+    private fun showBatteryGuide() {
+        val brand = Build.MANUFACTURER.lowercase()
+        val khusus = when {
+            brand.contains("xiaomi") || brand.contains("redmi") || brand.contains("poco") ->
+                "Xiaomi/Redmi/POCO: Info Aplikasi CKP Report → Hemat baterai → pilih \"Tanpa batasan\", lalu aktifkan \"Mulai otomatis\". Di layar Recent, kunci aplikasi (tahan kartu → ikon gembok)."
+            brand.contains("oppo") || brand.contains("realme") || brand.contains("oneplus") ->
+                "Oppo/Realme/OnePlus: Info Aplikasi → Penggunaan baterai → izinkan \"Aktivitas latar belakang\" dan \"Mulai otomatis\"; kunci aplikasi di layar Recent."
+            brand.contains("vivo") || brand.contains("iqoo") ->
+                "Vivo/iQOO: Pengaturan → Baterai → Konsumsi daya latar belakang → CKP Report → \"Izinkan aktivitas latar belakang\"; aktifkan juga Mulai otomatis."
+            brand.contains("samsung") ->
+                "Samsung: Pengaturan → Baterai → Batas penggunaan di latar belakang → keluarkan CKP Report dari \"Aplikasi tidur\" dan \"Aplikasi tidur lanjutan\"."
+            brand.contains("huawei") || brand.contains("honor") ->
+                "Huawei/Honor: Pengaturan → Baterai → Peluncuran aplikasi → CKP Report → atur manual, aktifkan semua (Mulai otomatis, Aktivitas latar belakang)."
+            else -> "Cari pengaturan baterai/aplikasi HP Anda lalu set CKP Report ke \"Tanpa batasan\" / \"Izinkan aktivitas latar belakang\"."
+        }
+        MaterialAlertDialogBuilder(this).setTitle("Agar tracking tidak terhenti")
+            .setMessage(
+                "Banyak HP mematikan aplikasi di latar belakang untuk hemat baterai, sehingga jalur terputus.\n\n" +
+                "1. Jangan tutup aplikasi dari daftar terbaru (kecuali sudah Stop Tracking).\n" +
+                "2. Izinkan CKP Report berjalan tanpa pembatasan baterai.\n" +
+                "3. $khusus\n\n" +
+                "Bila tetap terputus, saat aplikasi dibuka lagi Anda akan ditawari melanjutkan atau menyimpan jalur yang sudah terekam."
+            )
+            .setPositiveButton("Buka pengaturan baterai") { _, _ ->
+                try { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                catch (e: Exception) {
+                    try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (x: Exception) {}
+                }
+            }
+            .setNeutralButton("Pengaturan aplikasi") { _, _ ->
+                try { startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))) } catch (x: Exception) {}
+            }
+            .setNegativeButton("Mengerti", null).show()
+    }
+
+    /** Dipanggil saat aplikasi dibuka: tawarkan pemulihan tracking yang terputus & kirim log crash. */
+    private fun checkRecoveryAndCrash() {
+        val rec = Tracker.pendingRecovery(this)
+        if (rec != null) {
+            val jam = java.text.SimpleDateFormat("dd MMM HH:mm", java.util.Locale("id", "ID")).format(java.util.Date(rec.startedAt))
+            MaterialAlertDialogBuilder(this).setTitle("Tracking terputus")
+                .setMessage(
+                    "Ada tracking yang terhenti sebelum diselesaikan (aplikasi/service dimatikan sistem).\n\n" +
+                    "Mulai: $jam\nTitik: ${rec.points.size}\nJarak: ${Geo.km(rec.distance)}\nBlok: ${rec.blok.ifBlank { "-" }}\n\n" +
+                    "Lanjutkan merekam, simpan jalur yang sudah ada, atau buang?"
+                )
+                .setCancelable(false)
+                .setPositiveButton("Lanjutkan") { _, _ -> resumeTracking() }
+                .setNeutralButton("Simpan jalur") { _, _ -> saveRecovered(rec) }
+                .setNegativeButton("Buang") { _, _ -> Tracker.discard(this) }
+                .show()
+            return
+        }
+        val crash = CrashLog.unseenCrash(this) ?: return
+        CrashLog.markSeen(this)
+        MaterialAlertDialogBuilder(this).setTitle("Aplikasi sempat berhenti")
+            .setMessage("CKP Report sebelumnya berhenti tiba-tiba. Kirim log error ke pengembang agar bisa diperbaiki?")
+            .setPositiveButton("Kirim log") { _, _ -> shareLog() }
+            .setNegativeButton("Nanti", null).show()
+    }
+
+    private fun resumeTracking() {
+        if (!hasLocationPermission()) { toast("Izinkan akses lokasi dulu."); requestGps(); return }
+        if (!Tracker.resume(this)) { toast("Data tracking tidak dapat dibaca."); return }
+        try {
+            ContextCompat.startForegroundService(this, Intent(this, TrackingService::class.java))
+        } catch (e: Exception) {
+            Tracker.stop(this)
+            CrashLog.error(this, "resumeTracking", e)
+            toast("Tracking tidak dapat dilanjutkan: ${e.message}")
+            return
+        }
+        CrashLog.event(this, "Tracking dilanjutkan pengguna setelah terputus")
+        lastTrack = null
+        cbTrack.visibility = View.GONE
+        trackBox.visibility = View.VISIBLE
+        updateTrackUi()
+        trackHandler.removeCallbacks(trackTick)
+        trackHandler.post(trackTick)
+    }
+
+    private fun saveRecovered(rec: TrackRecord) {
+        if (rec.points.size < 2) { toast("Titik terlalu sedikit, jalur dibuang."); Tracker.discard(this); return }
+        val mid = rec.points[rec.points.size / 2]
+        val mapId = MapStore.pick(this, mid.lat, mid.lon)?.id ?: ""
+        val saved = rec.copy(id = UUID.randomUUID().toString(), mapId = mapId)
+        TrackStore.add(this, saved)
+        Tracker.discard(this)
+        peta.refresh()
+        toast("Jalur tersimpan di tab Peta (${saved.points.size} titik, ${Geo.km(saved.distance)}).")
+    }
+
+    private fun shareLog() {
+        val f = File(File(cacheDir, "exports").apply { mkdirs() }, "CKP_Log_" +
+            java.text.SimpleDateFormat("yyyyMMdd_HHmm", java.util.Locale.US).format(java.util.Date()) + ".txt")
+        if (!CrashLog.bundle(this, f)) { toast("Log tidak dapat dibuat."); return }
+        Share.file(this, f, "text/plain", "Kirim log error")
     }
 
     private fun updateTrackUi() {
@@ -973,6 +1092,8 @@ class MainActivity : AppCompatActivity() {
             contentResolver.openInputStream(uri)?.use { it.readBytes() }
         } catch (e: Exception) { null }
         if (bytes == null) { toast("File tidak dapat dibuka."); return }
+        val fname = displayName(uri)
+        if (GisImport.detect(bytes, fname) != null) { importGis(bytes, fname); return }
         if (bytes.size > 4 && bytes[0] == 'P'.code.toByte() && bytes[1] == 'K'.code.toByte()) {
             // paket peta offline (hasil "Share File Peta")
             val app = applicationContext
@@ -994,6 +1115,36 @@ class MainActivity : AppCompatActivity() {
             else -> "Import: ${r.first} tracking, ${r.second} tanda baru."
         })
         peta.refresh()
+    }
+
+    /** Import tanda/tracking dari KML, KMZ, GPX, GeoJSON, CSV, atau Shapefile (zip). */
+    private fun importGis(bytes: ByteArray, name: String) {
+        toast("Membaca file...")
+        val app = applicationContext
+        Thread {
+            val r = GisImport.parse(bytes, name)
+            runOnUiThread {
+                if (r.error != null) {
+                    MaterialAlertDialogBuilder(this).setTitle("Import gagal").setMessage(r.error)
+                        .setPositiveButton("OK", null).show()
+                    return@runOnUiThread
+                }
+                if (r.markers.isEmpty() && r.tracks.isEmpty()) {
+                    MaterialAlertDialogBuilder(this).setTitle("Import ${r.format}")
+                        .setMessage("Tidak ada titik atau jalur yang bisa dibaca dari file ini.")
+                        .setPositiveButton("OK", null).show()
+                    return@runOnUiThread
+                }
+                MaterialAlertDialogBuilder(this).setTitle("Import ${r.format}")
+                    .setMessage("Ditemukan ${r.markers.size} tanda dan ${r.tracks.size} jalur tracking.\n\nData yang sudah ada tidak ditimpa. Lanjut import?")
+                    .setPositiveButton("Import") { _, _ ->
+                        val (nm, nt) = GisImport.apply(app, r)
+                        peta.refresh()
+                        toast("Berhasil: $nm tanda baru, $nt jalur baru.")
+                    }
+                    .setNegativeButton("Batal", null).show()
+            }
+        }.start()
     }
 
     /** Tombol tracking di tab Peta: sama dengan tab Laporan, tetapi menanyakan Blok bila masih kosong. */
@@ -1086,6 +1237,22 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { importTracks.launch(arrayOf("*/*")) }
         })
         f.addView(rowBk)
+
+        f.addView(section("Bantuan & Diagnosa"))
+        val rowHelp = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowHelp.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Panduan Tracking"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(4) }
+            setOnClickListener { showBatteryGuide() }
+        })
+        rowHelp.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Kirim Log Error"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4) }
+            setOnClickListener { shareLog() }
+        })
+        f.addView(rowHelp)
 
         val d = MaterialAlertDialogBuilder(this)
             .setTitle("Pengaturan")

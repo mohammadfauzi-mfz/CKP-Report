@@ -155,9 +155,60 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     }
 
     /** Dipanggil saat tab Peta (utama) ditampilkan. */
+    // ---- kompas ----
+    private val sensorMgr = context.getSystemService(Context.SENSOR_SERVICE) as android.hardware.SensorManager
+    private var azimuth = -1f
+    private var lastShownAz = -999f
+    private val rotMat = FloatArray(9)
+    private val orient = FloatArray(3)
+    private val compassListener = object : android.hardware.SensorEventListener {
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            try {
+                android.hardware.SensorManager.getRotationMatrixFromVector(rotMat, e.values)
+                android.hardware.SensorManager.getOrientation(rotMat, orient)
+            } catch (x: Exception) { return }
+            var az = Math.toDegrees(orient[0].toDouble()).toFloat()
+            if (az < 0) az += 360f
+            // haluskan (rata-rata melingkar) supaya kerucut tidak bergetar
+            azimuth = if (azimuth < 0) az else {
+                var d = az - azimuth
+                if (d > 180) d -= 360f else if (d < -180) d += 360f
+                ((azimuth + d * 0.25f) + 360f) % 360f
+            }
+            var diff = Math.abs(azimuth - lastShownAz)
+            if (diff > 180) diff = 360f - diff
+            if (diff >= 2f) {
+                lastShownAz = azimuth
+                canvas.setHeading(azimuth)
+                updateInfo()
+            }
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, accuracy: Int) {}
+    }
+
+    private fun startCompass() {
+        try {
+            val s = sensorMgr.getDefaultSensor(android.hardware.Sensor.TYPE_ROTATION_VECTOR) ?: return
+            sensorMgr.registerListener(compassListener, s, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun stopCompass() {
+        try { sensorMgr.unregisterListener(compassListener) } catch (e: Exception) {}
+        azimuth = -1f; lastShownAz = -999f
+        canvas.setHeading(null)
+    }
+
+    private fun arah8(deg: Float): String {
+        val n = arrayOf("Utara", "Timur Laut", "Timur", "Tenggara", "Selatan", "Barat Daya", "Barat", "Barat Laut")
+        return n[(((deg + 22.5f) % 360f) / 45f).toInt() % 8]
+    }
+
     fun onShown() {
         shown = true
         startLocation()
+        startCompass()
         if (curMap == null) initMap() else reloadOverlays()
         handler.removeCallbacks(tick)
         handler.post(tick)
@@ -168,6 +219,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     fun onHidden() {
         shown = false
         stopLocation()
+        stopCompass()
         handler.removeCallbacks(tick)
     }
 
@@ -518,9 +570,15 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             l == null -> sb.append("Mencari sinyal GPS…")
             else -> {
                 sb.append("Posisi saya: ").append(Laporan.koordinatSalin(l.latitude, l.longitude))
-                if (l.hasAccuracy()) sb.append(" (±").append(Laporan.angka(l.accuracy.toDouble(), 0)).append(" m)")
+                if (l.hasAccuracy()) {
+                    sb.append(" (±").append(Laporan.angka(l.accuracy.toDouble(), 0)).append(" m)")
+                    if (l.accuracy > MarkingText.ACC_OK) sb.append(" ⚠ kurang akurat")
+                    else sb.append(" ✓")
+                }
+                sb.append("\nUTM: ").append(Coord.utmText(l.latitude, l.longitude))
+                if (azimuth >= 0f) sb.append(" • Arah: ").append(azimuth.toInt()).append("° ").append(arah8(azimuth))
                 val m = curMap
-                if (m != null && m.id != "plain" && !m.contains(l.latitude, l.longitude)) sb.append(" • di luar peta ini")
+                if (m != null && m.id != "plain" && !m.contains(l.latitude, l.longitude)) sb.append("\n⚠ Posisi di luar peta ini")
             }
         }
         if (Tracker.active) {
@@ -529,7 +587,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         }
         val s = selected
         if (canvas.mode == MapCanvasView.Mode.NORMAL) {
-            if (s != null) sb.append("\nTitik terpilih").append(if (followMe) " (ikut posisi saya): " else ": ").append(Laporan.koordinatSalin(s.first, s.second)).append(" (ketuk teks untuk salin)")
+            if (s != null) sb.append("\nTitik terpilih").append(if (followMe) " (ikut posisi saya): " else ": ").append(Laporan.koordinatSalin(s.first, s.second)).append("  UTM ").append(Coord.utmText(s.first, s.second)).append(" (ketuk teks untuk salin)")
         } else {
             sb.append("\n").append(measureText())
         }
@@ -583,6 +641,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                     if (m.note.isNotBlank()) append("Keterangan: ${m.note}\n")
                     append("Tanggal: ${MarkingText.tanggal(m.createdAt)}\n")
                     append("Koordinat: ${Laporan.koordinatSalin(m.lat, m.lon)}")
+                    if (m.acc >= 0.0) append("\nAkurasi GPS: ${MarkingText.accText(m)}${if (m.acc > MarkingText.ACC_OK) " ⚠" else ""}")
                     append(jarak)
                 }
             )
@@ -596,14 +655,33 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
 
     // ---- tombol ----
 
+    /** Akurasi GPS (m) bila titik ini adalah posisi saya (selisih < 3 m); -1 bila dipilih manual di peta. */
+    private fun accFor(lat: Double, lon: Double): Double {
+        val l = lastLoc ?: return -1.0
+        if (!l.hasAccuracy()) return -1.0
+        val d = Geo.dist(TPoint(l.latitude, l.longitude, 0), TPoint(lat, lon, 0))
+        return if (d < 3.0) l.accuracy.toDouble() else -1.0
+    }
+
     private fun tandai() {
         val s = selected
         val l = lastLoc
-        when {
-            s != null -> editor(null, s.first, s.second, null)
-            l != null -> editor(null, l.latitude, l.longitude, null)
-            else -> toast("Ketuk peta untuk memilih lokasi (atau tunggu GPS), lalu tekan Tandai. Tahan lama di peta untuk menandai langsung.")
+        val target: Pair<Double, Double>? = s ?: l?.let { Pair(it.latitude, it.longitude) }
+        if (target == null) {
+            toast("Ketuk peta untuk memilih lokasi (atau tunggu GPS), lalu tekan Tandai. Tahan lama di peta untuk menandai langsung.")
+            return
         }
+        val acc = accFor(target.first, target.second)
+        if (acc > MarkingText.ACC_OK) {
+            MaterialAlertDialogBuilder(context).setTitle("⚠ Akurasi GPS kurang baik")
+                .setMessage("Akurasi posisi Anda saat ini ±${Laporan.angka(acc, 0)} m (batas baik ±${Laporan.angka(MarkingText.ACC_OK, 0)} m).\n\n" +
+                    "Tanda bisa meleset puluhan meter. Pindah ke area terbuka tanpa kanopi/bangunan, tunggu beberapa detik sampai angka akurasi mengecil, lalu tandai.")
+                .setPositiveButton("Tunggu dulu", null)
+                .setNegativeButton("Tandai tetap") { _, _ -> editor(null, target.first, target.second, null) }
+                .show()
+            return
+        }
+        editor(null, target.first, target.second, null)
     }
 
     private fun pilihUkur() {
@@ -688,24 +766,21 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     }
 
     private fun cariKoordinat() {
-        val (til, et) = inputField(context, "Koordinat: lat,lon (mis. 0.746073,117.415342)", InputType.TYPE_CLASS_TEXT)
-        val box = FrameLayout(context)
-        box.setPadding(dp(20), dp(8), dp(20), 0)
+        val (til, et) = inputField(context, "Koordinat (desimal, DMS, atau UTM)", InputType.TYPE_CLASS_TEXT)
+        val box = LinearLayout(context).apply { orientation = VERTICAL; setPadding(dp(20), dp(8), dp(20), 0) }
         box.addView(til)
+        box.addView(TextView(context).apply {
+            text = "Contoh:\n• -0.746073,117.415342\n• 0°44'45.8\"LU 117°24'55.2\"BT\n• 50N 512345 82345 (UTM)"
+            textSize = 12f
+        })
         MaterialAlertDialogBuilder(context).setTitle("Cari koordinat").setView(box)
             .setPositiveButton("Cari") { _, _ ->
-                val parts = et.text.toString().trim().split(Regex("[,;\\s]+")).filter { it.isNotBlank() }
-                val lat = parts.getOrNull(0)?.let { parseNum(it) }
-                val lon = parts.getOrNull(1)?.let { parseNum(it) }
-                if (parts.size != 2 || lat == null || lon == null || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-                    toast("Format salah. Contoh: 0.746073,117.415342")
-                } else {
-                    goTo(lat, lon)
-                }
+                val r = Coord.parse(et.text.toString())
+                if (r == null) toast("Format tidak dikenali. Gunakan desimal, DMS, atau UTM.")
+                else { toast("Terbaca sebagai ${r.kind}"); goTo(r.lat, r.lon) }
             }.setNegativeButton("Batal", null).show()
     }
 
-    /** Pindah tampilan ke koordinat (ganti peta bila perlu) dan pilih titik itu. */
     private fun goTo(lat: Double, lon: Double, zoomMeters: Double = 150.0) {
         selectPane(0)
         val cur = curMap
@@ -859,9 +934,15 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         })
         showPrev()
 
+        val accVal = existing?.acc ?: accFor(lat, lon)
         col.addView(TextView(context).apply {
-            text = "Koordinat: ${Laporan.koordinatSalin(lat, lon)}"
+            text = "Koordinat: ${Laporan.koordinatSalin(lat, lon)}" + when {
+                accVal < 0.0 -> "\nPosisi dipilih manual di peta (akurasi GPS tidak tercatat)"
+                accVal > MarkingText.ACC_OK -> "\n⚠ Akurasi GPS ±${Laporan.angka(accVal, 0)} m (kurang baik)"
+                else -> "\nAkurasi GPS ±${Laporan.angka(accVal, 0)} m ✓"
+            }
             textSize = 12f
+            if (accVal > MarkingText.ACC_OK) setTextColor(0xFFE65100.toInt())
             setPadding(0, dp(10), 0, dp(8))
         })
         paint()
@@ -885,6 +966,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 iconKey, title, etB.text.toString().trim().uppercase(), etK.text.toString().trim(),
                 etV.num(), etS.text.toString().trim(), lat, lon,
                 if (removePhoto) "" else (existing?.photo ?: ""),
+                accVal,
             )
             if (removePhoto) MarkerStore.deletePhoto(context, id)
             val nr = newRaw
