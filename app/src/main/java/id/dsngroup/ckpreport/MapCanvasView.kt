@@ -48,7 +48,7 @@ class MapCanvasView(context: Context) : View(context) {
     private class Mk(val m: Marker, val x: Float, val y: Float)
     private var marks: List<Mk> = emptyList()
     private var history: List<FloatArray> = emptyList()   // pasangan x,y (piksel peta)
-    private var live: FloatArray = FloatArray(0)
+    private var live: List<FloatArray> = emptyList()
     private var me: Triple<Float, Float, Float>? = null  // x, y, akurasi (m)
     private var sel: Pair<Float, Float>? = null
     private val measure = ArrayList<Pair<Double, Double>>()  // lat, lon
@@ -113,13 +113,13 @@ class MapCanvasView(context: Context) : View(context) {
 
     fun setHistory(tracks: List<List<TPoint>>) {
         val m = info
-        history = if (m == null) emptyList() else tracks.map { toXY(m, it) }
+        history = if (m == null) emptyList() else tracks.flatMap { t -> Geo.segments(t).map { toXY(m, it) } }
         invalidate()
     }
 
     fun setLive(pts: List<TPoint>) {
         val m = info
-        live = if (m == null) FloatArray(0) else toXY(m, pts)
+        live = if (m == null) emptyList() else Geo.segments(pts).map { toXY(m, it) }
         invalidate()
     }
 
@@ -270,10 +270,12 @@ class MapCanvasView(context: Context) : View(context) {
         if (ts != null) drawTiles(c, m, ts)
 
         if (showHistory) for (h in history) drawPath(c, h, histPaint)
-        drawPath(c, live, trackPaint)
-        if (live.size >= 4) {
-            dot(c, sx(live[0]), sy(live[1]), 0xFF2E7D32.toInt(), d(6f))
-            dot(c, sx(live[live.size - 2]), sy(live[live.size - 1]), 0xFF1565C0.toInt(), d(6f))
+        for (seg in live) drawPath(c, seg, trackPaint)
+        val firstSeg = live.firstOrNull()
+        val lastSeg = live.lastOrNull()
+        if (firstSeg != null && lastSeg != null && firstSeg.size >= 2 && lastSeg.size >= 2) {
+            dot(c, sx(firstSeg[0]), sy(firstSeg[1]), 0xFF2E7D32.toInt(), d(6f))
+            dot(c, sx(lastSeg[lastSeg.size - 2]), sy(lastSeg[lastSeg.size - 1]), 0xFF1565C0.toInt(), d(6f))
         }
         drawMeasure(c, m)
         for (k in marks) drawMarker(c, k)

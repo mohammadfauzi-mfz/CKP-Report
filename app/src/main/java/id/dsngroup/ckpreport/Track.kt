@@ -26,7 +26,8 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-data class TPoint(val lat: Double, val lon: Double, val t: Long)
+/** brk = true: titik pertama setelah jeda/terputus, tidak disambung garis ke titik sebelumnya. */
+data class TPoint(val lat: Double, val lon: Double, val t: Long, val brk: Boolean = false)
 
 data class TrackRecord(
     val id: String,
@@ -37,9 +38,10 @@ data class TrackRecord(
     val blok: String,
     val mapId: String,
     val points: List<TPoint>,
+    val pausedMs: Long = 0L,      // total waktu jeda (pause) yang tidak dihitung sebagai durasi jalan
 ) {
     val distance: Double get() = Geo.length(points)
-    val durationMs: Long get() = (endedAt - startedAt).coerceAtLeast(0L)
+    val durationMs: Long get() = (endedAt - startedAt - pausedMs).coerceAtLeast(0L)
 }
 
 object Geo {
@@ -54,9 +56,30 @@ object Geo {
 
     fun length(p: List<TPoint>): Double {
         var d = 0.0
-        for (i in 1 until p.size) d += dist(p[i - 1], p[i])
+        for (i in 1 until p.size) if (!p[i].brk) d += dist(p[i - 1], p[i])
         return d
     }
+
+    /** Pecah jalur menjadi bagian-bagian menerus (dipisah oleh jeda/terputus). */
+    fun segments(p: List<TPoint>): List<List<TPoint>> {
+        if (p.isEmpty()) return emptyList()
+        val out = ArrayList<List<TPoint>>()
+        var cur = ArrayList<TPoint>()
+        for (pt in p) {
+            if (pt.brk && cur.isNotEmpty()) { out.add(cur); cur = ArrayList() }
+            cur.add(pt)
+        }
+        if (cur.isNotEmpty()) out.add(cur)
+        return out
+    }
+
+    fun ptJson(p: TPoint): JSONArray {
+        val a = JSONArray().put(p.lat).put(p.lon).put(p.t)
+        if (p.brk) a.put(1)
+        return a
+    }
+
+    fun ptFrom(p: JSONArray): TPoint = TPoint(p.getDouble(0), p.getDouble(1), p.optLong(2), p.optInt(3, 0) == 1)
 
     /** Luas poligon (jalur ditutup dari titik akhir ke awal), meter persegi, perkiraan datar. */
     fun areaM2(p: List<TPoint>): Double {
@@ -93,6 +116,10 @@ object Tracker {
     @Volatile var est = ""
     @Volatile var afd = ""
     @Volatile var blok = ""
+    @Volatile var paused = false
+    @Volatile private var pausedDone = 0L      // jumlah jeda yang sudah selesai (ms)
+    @Volatile private var pauseStart = 0L
+    private var breakNext = false              // titik berikutnya dimulai sebagai bagian garis baru
     private val pts = ArrayList<TPoint>()
     private var lastSave = 0L
 
@@ -104,12 +131,36 @@ object Tracker {
         gpsError = null
         lastFixAt = 0L
         this.est = est; this.afd = afd; this.blok = blok
+        paused = false; pausedDone = 0L; pauseStart = 0L; breakNext = false
         active = true
+        if (ctx != null) save(ctx, true)
+    }
+
+    /** Total waktu jeda sampai sekarang (ms), termasuk jeda yang sedang berjalan. */
+    fun pausedTotal(): Long = pausedDone + (if (paused && pauseStart > 0L) System.currentTimeMillis() - pauseStart else 0L)
+
+    /** Jeda tracking: titik GPS tidak direkam dan jarak tidak bertambah. */
+    fun pause(ctx: Context? = null) {
+        if (!active || paused) return
+        pauseStart = System.currentTimeMillis()
+        paused = true
+        if (ctx != null) save(ctx, true)
+    }
+
+    /** Lanjutkan setelah jeda; garis baru dimulai dari titik berikutnya (tidak menyambung lompatan). */
+    fun unpause(ctx: Context? = null) {
+        if (!active || !paused) return
+        pausedDone += System.currentTimeMillis() - pauseStart
+        pauseStart = 0L
+        paused = false
+        breakNext = true
+        lastFixAt = 0L
         if (ctx != null) save(ctx, true)
     }
 
     /** Hentikan dan kembalikan titik-titik yang terkumpul. */
     fun stop(ctx: Context? = null): List<TPoint> {
+        if (paused) { pausedDone += System.currentTimeMillis() - pauseStart; pauseStart = 0L; paused = false }
         active = false
         if (ctx != null) discard(ctx)
         return snapshot()
@@ -120,7 +171,10 @@ object Tracker {
     fun add(p: TPoint) {
         synchronized(pts) {
             val last = pts.lastOrNull()
-            if (last == null || Geo.dist(last, p) >= 3.0) pts.add(p)   // abaikan getaran GPS < 3 m
+            if (breakNext) {
+                pts.add(if (last != null) p.copy(brk = true) else p)
+                breakNext = false
+            } else if (last == null || Geo.dist(last, p) >= 3.0) pts.add(p)   // abaikan getaran GPS < 3 m
         }
         lastFixAt = System.currentTimeMillis()
     }
@@ -132,8 +186,9 @@ object Tracker {
         lastSave = now
         try {
             val a = JSONArray()
-            for (p in snapshot()) a.put(JSONArray().put(p.lat).put(p.lon).put(p.t))
+            for (p in snapshot()) a.put(Geo.ptJson(p))
             val o = JSONObject().put("start", startedAt).put("est", est).put("afd", afd).put("blok", blok).put("pts", a)
+                .put("paused", paused).put("pausedDone", pausedDone).put("pauseStart", pauseStart).put("brk", breakNext)
             val tmp = File(ctx.filesDir, "active_track.tmp")
             tmp.writeText(o.toString())
             tmp.renameTo(file(ctx))
@@ -161,11 +216,12 @@ object Tracker {
             val list = ArrayList<TPoint>()
             for (i in 0 until a.length()) {
                 val p = a.optJSONArray(i) ?: continue
-                list.add(TPoint(p.getDouble(0), p.getDouble(1), p.optLong(2)))
+                list.add(Geo.ptFrom(p))
             }
             if (list.isEmpty()) { f.delete(); return null }
             val st = o.optLong("start")
-            TrackRecord("recovered", st, list.last().t.coerceAtLeast(st), o.optString("est"), o.optString("afd"), o.optString("blok"), "", list)
+            TrackRecord("recovered", st, list.last().t.coerceAtLeast(st), o.optString("est"), o.optString("afd"), o.optString("blok"), "", list,
+                o.optLong("pausedDone"))
         } catch (e: Exception) {
             null
         }
@@ -179,6 +235,11 @@ object Tracker {
         est = r.est; afd = r.afd; blok = r.blok
         gpsError = null
         lastFixAt = 0L
+        pausedDone = r.pausedMs
+        val saved = try { JSONObject(file(ctx).readText()) } catch (e: Exception) { null }
+        pauseStart = if (saved?.optBoolean("paused") == true) saved.optLong("pauseStart") else 0L
+        paused = pauseStart > 0L
+        breakNext = true        // ada selang waktu sejak titik terakhir: jangan sambung garis lurus
         active = true
         return true
     }
@@ -199,6 +260,10 @@ class TrackingService : Service(), LocationListener {
             if (Tracker.resume(this)) CrashLog.event(this, "Tracking dipulihkan otomatis setelah service terbunuh (${Tracker.snapshot().size} titik)")
             else { stopSelf(); return START_NOT_STICKY }
         }
+        if (intent?.action == ACTION_TOGGLE_PAUSE) {
+            if (Tracker.paused) Tracker.unpause(this) else Tracker.pause(this)
+            CrashLog.event(this, if (Tracker.paused) "Tracking dijeda (dari notifikasi)" else "Tracking dilanjutkan (dari notifikasi)")
+        }
         val n = buildNotification()
         try {
             if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
@@ -210,7 +275,7 @@ class TrackingService : Service(), LocationListener {
             return START_NOT_STICKY
         }
         acquireWake()
-        startUpdates()
+        if (Tracker.paused) stopUpdates() else startUpdates()      // saat dijeda GPS dimatikan (hemat baterai)
         CrashLog.event(this, "Service tracking berjalan (intent=${if (intent == null) "restart sistem" else "start"})")
         return START_STICKY
     }
@@ -247,15 +312,26 @@ class TrackingService : Service(), LocationListener {
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val toggle = PendingIntent.getService(
+            this, 1, Intent(this, TrackingService::class.java).setAction(ACTION_TOGGLE_PAUSE),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
         val pts = Tracker.snapshot()
+        val paused = Tracker.paused
         return NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("Tracking CKP aktif")
-            .setContentText("${pts.size} titik • ${Geo.km(Geo.length(pts))}. Buka aplikasi lalu tekan Stop Tracking untuk selesai.")
+            .setContentTitle(if (paused) "Tracking CKP dijeda" else "Tracking CKP aktif")
+            .setContentText("${pts.size} titik • ${Geo.km(Geo.length(pts))}. " +
+                if (paused) "GPS dimatikan sementara. Tekan Lanjut untuk meneruskan." else "Buka aplikasi lalu tekan Stop Tracking untuk selesai.")
             .setOnlyAlertOnce(true)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(open)
+            .addAction(if (paused) android.R.drawable.ic_media_play else android.R.drawable.ic_media_pause, if (paused) "Lanjut" else "Jeda", toggle)
             .build()
+    }
+
+    private fun stopUpdates() {
+        try { lm?.removeUpdates(this) } catch (e: Exception) {}
     }
 
     @SuppressLint("MissingPermission")
@@ -274,7 +350,7 @@ class TrackingService : Service(), LocationListener {
     }
 
     override fun onLocationChanged(location: Location) {
-        if (!Tracker.active) return
+        if (!Tracker.active || Tracker.paused) return
         if (location.hasAccuracy() && location.accuracy > 35f) return   // abaikan titik yang kurang akurat
         Tracker.add(TPoint(location.latitude, location.longitude, System.currentTimeMillis()))
         Tracker.save(this)
@@ -303,6 +379,7 @@ class TrackingService : Service(), LocationListener {
     companion object {
         private const val CHANNEL = "tracking"
         private const val NOTIF_ID = 77
+        const val ACTION_TOGGLE_PAUSE = "id.dsngroup.ckpreport.TOGGLE_PAUSE"
     }
 }
 
@@ -313,10 +390,11 @@ object TrackStore {
 
     fun toJson(r: TrackRecord): JSONObject {
         val pts = JSONArray()
-        for (p in r.points) pts.put(JSONArray().put(p.lat).put(p.lon).put(p.t))
+        for (p in r.points) pts.put(Geo.ptJson(p))
         return JSONObject()
             .put("id", r.id).put("start", r.startedAt).put("end", r.endedAt)
             .put("est", r.est).put("afd", r.afd).put("blok", r.blok).put("map", r.mapId)
+            .put("paused", r.pausedMs)
             .put("pts", pts)
     }
 
@@ -325,11 +403,12 @@ object TrackStore {
         val pts = ArrayList<TPoint>(a.length())
         for (i in 0 until a.length()) {
             val p = a.optJSONArray(i) ?: continue
-            pts.add(TPoint(p.getDouble(0), p.getDouble(1), p.optLong(2)))
+            pts.add(Geo.ptFrom(p))
         }
         return TrackRecord(
             o.getString("id"), o.optLong("start"), o.optLong("end"),
             o.optString("est"), o.optString("afd"), o.optString("blok"), o.optString("map"), pts,
+            o.optLong("paused"),
         )
     }
 

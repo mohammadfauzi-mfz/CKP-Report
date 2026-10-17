@@ -80,9 +80,15 @@ object Gis {
                 sb.append("<Placemark><name>${xml(trackName(r))}</name>")
                 sb.append("<description>${xml("Jarak ${Geo.km(r.distance)}; ${r.points.size} titik; Est ${r.est}; Afd ${r.afd}")}</description>")
                 sb.append("<TimeSpan><begin>${iso(r.startedAt)}</begin><end>${iso(r.endedAt)}</end></TimeSpan><styleUrl>#trk</styleUrl>")
-                sb.append("<LineString><tessellate>1</tessellate><coordinates>")
-                sb.append(r.points.joinToString(" ") { "${d6(it.lon)},${d6(it.lat)},0" })
-                sb.append("</coordinates></LineString></Placemark>\n")
+                val segs = Geo.segments(r.points).filter { it.size >= 2 }
+                if (segs.size > 1) sb.append("<MultiGeometry>")
+                for (sg in segs) {
+                    sb.append("<LineString><tessellate>1</tessellate><coordinates>")
+                    sb.append(sg.joinToString(" ") { "${d6(it.lon)},${d6(it.lat)},0" })
+                    sb.append("</coordinates></LineString>")
+                }
+                if (segs.size > 1) sb.append("</MultiGeometry>")
+                sb.append("</Placemark>\n")
             }
             sb.append("</Folder>\n")
         }
@@ -108,7 +114,10 @@ object Gis {
         for (r in tracks) {
             if (r.points.size < 2) continue
             sb.append("<trk><name>${xml(trackName(r))}</name><trkseg>\n")
-            for (p in r.points) sb.append("<trkpt lat=\"${d6(p.lat)}\" lon=\"${d6(p.lon)}\"><time>${iso(if (p.t > 0) p.t else r.startedAt)}</time></trkpt>\n")
+            for ((i, p) in r.points.withIndex()) {
+                if (p.brk && i > 0) sb.append("</trkseg>\n<trkseg>\n")      // jeda: segmen baru
+                sb.append("<trkpt lat=\"${d6(p.lat)}\" lon=\"${d6(p.lon)}\"><time>${iso(if (p.t > 0) p.t else r.startedAt)}</time></trkpt>\n")
+            }
             sb.append("</trkseg></trk>\n")
         }
         sb.append("</gpx>\n")
@@ -143,9 +152,14 @@ object Gis {
         }
         for (r in tracks) {
             if (r.points.size < 2) continue
+            val segs = Geo.segments(r.points).filter { it.size >= 2 }
+            val geom = if (segs.size > 1)
+                "{\"type\":\"MultiLineString\",\"coordinates\":[" +
+                    segs.joinToString(",") { sg -> "[" + sg.joinToString(",") { "[${d6(it.lon)},${d6(it.lat)}]" } + "]" } + "]}"
+            else
+                "{\"type\":\"LineString\",\"coordinates\":[" + r.points.joinToString(",") { "[${d6(it.lon)},${d6(it.lat)}]" } + "]}"
             feats.add(
-                "{\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[" +
-                    r.points.joinToString(",") { "[${d6(it.lon)},${d6(it.lat)}]" } + "]}," +
+                "{\"type\":\"Feature\",\"geometry\":" + geom + "," +
                     "\"properties\":{\"jenis\":\"tracking\",\"nama\":${js(trackName(r))},\"est\":${js(r.est)},\"afd\":${js(r.afd)},\"blok\":${js(r.blok)}," +
                     "\"mulai\":${js(iso(r.startedAt))},\"selesai\":${js(iso(r.endedAt))},\"jarak_m\":${d6(r.distance)}}}"
             )
@@ -272,15 +286,17 @@ object Gis {
             }
             val tr = tracks.filter { it.points.size >= 2 }
             if (tr.isNotEmpty()) {
-                val (s, x) = shp(false, tr.map { r -> r.points.map { doubleArrayOf(it.lon, it.lat) } })
+                val parts = tr.flatMap { r -> Geo.segments(r.points).filter { it.size >= 2 }.map { sg -> Pair(r, sg) } }
+                val (s, x) = shp(false, parts.map { (_, sg) -> sg.map { doubleArrayOf(it.lon, it.lat) } })
                 put(z, "ckp_tracking.shp", s); put(z, "ckp_tracking.shx", x)
                 val f = listOf(
                     Field("NAMA", 'C', 100), Field("EST", 'C', 30), Field("AFD", 'C', 30), Field("BLOK", 'C', 20),
                     Field("MULAI", 'C', 20), Field("SELESAI", 'C', 20), Field("JARAK_M", 'N', 14, 1), Field("TITIK", 'N', 8, 0),
                 )
-                put(z, "ckp_tracking.dbf", dbf(f, tr.map {
+                // satu rekaman per bagian garis (tracking yang dijeda menjadi beberapa bagian)
+                put(z, "ckp_tracking.dbf", dbf(f, parts.map { (it, sg) ->
                     listOf(trackName(it), it.est, it.afd, it.blok, iso(it.startedAt), iso(it.endedAt),
-                        String.format(Locale.US, "%.1f", it.distance), it.points.size.toString())
+                        String.format(Locale.US, "%.1f", Geo.length(sg)), sg.size.toString())
                 }))
                 put(z, "ckp_tracking.prj", PRJ.toByteArray()); put(z, "ckp_tracking.cpg", "UTF-8".toByteArray())
             }

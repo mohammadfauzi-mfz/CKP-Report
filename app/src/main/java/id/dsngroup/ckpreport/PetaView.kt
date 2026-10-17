@@ -39,6 +39,7 @@ import java.util.UUID
 interface PetaHost {
     fun importData()
     fun toggleTracking()
+    fun togglePause()
     fun hasLocationPermission(): Boolean
     fun requestLocationPermission()
     fun defaultBlok(): String
@@ -68,6 +69,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     private val tvInfo = TextView(context)
     private lateinit var btnMap: MaterialButton
     private lateinit var btnTrack: MaterialButton
+    private lateinit var btnPause: MaterialButton
     private val barNormal = LinearLayout(context)
     private val barMeasure = LinearLayout(context)
     private var curMap: MapInfo? = null
@@ -239,7 +241,9 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         override fun run() {
             if (!shown) return
             canvas.setLive(if (Tracker.active) Tracker.snapshot() else emptyList())
-            btnTrack.text = if (Tracker.active) "■ Stop Tracking" else "● Tracking"
+            btnTrack.text = if (Tracker.active) "■ Stop" else "● Tracking"
+            btnPause.visibility = if (Tracker.active) View.VISIBLE else View.GONE
+            btnPause.text = if (Tracker.paused) "▶ Lanjut" else "⏸ Pause"
             updateInfo()
             handler.postDelayed(this, 1000)
         }
@@ -342,6 +346,9 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         btnTrack = btn("● Tracking", true) { host.toggleTracking() }
         btnTrack.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFFD32F2F.toInt())
         barNormal.addView(btnTrack)
+        btnPause = btn("⏸ Pause") { host.togglePause() }
+        btnPause.visibility = View.GONE
+        barNormal.addView(btnPause)
         barNormal.addView(btn("📍 Tandai") { tandai() })
         barNormal.addView(btn("📏 Ukur") { pilihUkur() })
         barNormal.addView(btn("⋯ Lainnya") { menuLainnya() })
@@ -583,7 +590,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         }
         if (Tracker.active) {
             val p = Tracker.snapshot()
-            sb.append("\n● Tracking: ").append(p.size).append(" titik • ").append(Geo.meter(Geo.length(p)))
+            sb.append(if (Tracker.paused) "\n⏸ Tracking DIJEDA: " else "\n● Tracking: ").append(p.size).append(" titik • ").append(Geo.meter(Geo.length(p)))
         }
         val s = selected
         if (canvas.mode == MapCanvasView.Mode.NORMAL) {

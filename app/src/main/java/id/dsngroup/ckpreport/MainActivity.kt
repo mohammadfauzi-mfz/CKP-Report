@@ -71,6 +71,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var formScroll: ScrollView
     private lateinit var peta: PetaView
     private lateinit var btnTrack: MaterialButton
+    private lateinit var btnPause: MaterialButton
     private lateinit var btnSave: MaterialButton
     private lateinit var trackBox: LinearLayout
     private lateinit var tvTrackInfo: TextView
@@ -206,6 +207,16 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { toggleTracking() }
         }
         box.addView(btnTrack)
+        btnPause = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "⏸ Pause Tracking"
+            textSize = 14f
+            isAllCaps = false
+            visibility = View.GONE
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
+                .apply { bottomMargin = dp(4) }
+            setOnClickListener { togglePause() }
+        }
+        box.addView(btnPause)
         trackBox = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
@@ -328,6 +339,7 @@ class MainActivity : AppCompatActivity() {
         peta = PetaView(this, object : PetaHost {
             override fun importData() { importTracks.launch(arrayOf("*/*")) }
             override fun toggleTracking() { toggleTrackingFromPeta() }
+            override fun togglePause() { this@MainActivity.togglePause() }
             override fun hasLocationPermission() = this@MainActivity.hasLocationPermission()
             override fun requestLocationPermission() { requestGps() }
             override fun defaultBlok() = etBlok.text.toString().trim()
@@ -690,8 +702,10 @@ class MainActivity : AppCompatActivity() {
             }
             val pts = Tracker.snapshot()
             val gap = if (Tracker.lastFixAt > 0) (System.currentTimeMillis() - Tracker.lastFixAt) / 1000 else -1L
-            val warn = if (gap > 60) "\n⚠ Tidak ada titik GPS baru ${gap} dtk (sinyal lemah / GPS mati?)" else ""
-            tvTrackInfo.text = "● Tracking aktif • ${pts.size} titik • ${Geo.km(Geo.length(pts))}$warn"
+            val warn = if (gap > 60 && !Tracker.paused) "\n⚠ Tidak ada titik GPS baru ${gap} dtk (sinyal lemah / GPS mati?)" else ""
+            tvTrackInfo.text = (if (Tracker.paused) "⏸ Tracking DIJEDA (GPS mati sementara) • " else "● Tracking aktif • ") +
+                "${pts.size} titik • ${Geo.km(Geo.length(pts))}$warn"
+            updateTrackUi()
             renderPreview(pts, null)
             trackHandler.postDelayed(this, 2000)
         }
@@ -699,6 +713,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleTracking() {
         if (Tracker.active) stopTracking() else startTracking()
+    }
+
+    /** Jeda / lanjutkan tracking (dipakai tombol di tab Laporan dan tab Peta). */
+    private fun togglePause() {
+        if (!Tracker.active) return
+        if (Tracker.paused) Tracker.unpause(this) else Tracker.pause(this)
+        CrashLog.event(this, if (Tracker.paused) "Tracking dijeda pengguna" else "Tracking dilanjutkan pengguna")
+        try {
+            // service menyesuaikan GPS (mati saat jeda, hidup saat lanjut) dan memperbarui notifikasi
+            ContextCompat.startForegroundService(this, Intent(this, TrackingService::class.java))
+        } catch (e: Exception) {
+            CrashLog.error(this, "togglePause", e)
+            toast("Gagal mengubah status tracking: ${e.message}")
+        }
+        updateTrackUi()
+        toast(if (Tracker.paused) "Tracking dijeda. GPS dimatikan sementara." else "Tracking dilanjutkan.")
     }
 
     private fun startTracking() {
@@ -758,6 +788,7 @@ class MainActivity : AppCompatActivity() {
         val rec = TrackRecord(
             UUID.randomUUID().toString(), Tracker.startedAt, System.currentTimeMillis(),
             etEst.text.toString().trim(), etAfd.text.toString().trim(), etBlok.text.toString().trim(), mapId, pts,
+            Tracker.pausedTotal(),
         )
         TrackStore.add(this, rec)
         lastTrack = rec
@@ -882,6 +913,8 @@ class MainActivity : AppCompatActivity() {
     private fun updateTrackUi() {
         val active = Tracker.active
         btnTrack.text = if (active) "Stop Tracking" else "Start Tracking"
+        btnPause.visibility = if (active) View.VISIBLE else View.GONE
+        btnPause.text = if (Tracker.paused) "▶ Lanjutkan Tracking" else "⏸ Pause Tracking"
         btnTrack.backgroundTintList = ColorStateList.valueOf(if (active) 0xFF7F0000.toInt() else 0xFFD32F2F.toInt())
         val rec = lastTrack
         cbTrack.visibility = if (!active && rec != null) View.VISIBLE else View.GONE

@@ -73,7 +73,7 @@ class AboutActivity : AppCompatActivity() {
 
         // Versi di bagian paling bawah
         val version = try {
-            packageManager.getPackageInfo(packageName, 0).versionName ?: "2.2"
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "2.3"
         } catch (e: Exception) {
             "2.1"
         }

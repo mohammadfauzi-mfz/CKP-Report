@@ -81,7 +81,7 @@ object TrackRender {
         for (i in 0 until n) {
             val ox = ((xs[i] - left) / s).toFloat()
             val oy = ((ys[i] - top) / s).toFloat()
-            if (i == 0) path.moveTo(ox, oy) else path.lineTo(ox, oy)
+            if (i == 0 || pts[i].brk) path.moveTo(ox, oy) else path.lineTo(ox, oy)    // jeda: putus garis
         }
         val sw = max(5f, w * 0.006f)
         val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
