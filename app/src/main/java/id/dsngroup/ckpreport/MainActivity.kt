@@ -103,6 +103,10 @@ class MainActivity : AppCompatActivity() {
         startGps()
         if (::tabs.isInitialized && tabs.selectedTabPosition == 2) peta.onShown()
     }
+    private val simpanRekap = registerForActivityResult(ActivityResultContracts.CreateDocument(Rekap.MIME)) { uri ->
+        rekapUi.simpan(uri)
+    }
+    private val rekapUi by lazy { RekapUi(this, prefs) { nama -> simpanRekap.launch(nama) } }
     private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) doImportMap(uri)
     }
@@ -1270,6 +1274,27 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { importTracks.launch(arrayOf("*/*")) }
         })
         f.addView(rowBk)
+
+        f.addView(section("Rekap Excel (dari data terupload)"))
+        f.addView(TextView(this).apply {
+            text = "Unduh laporan yang sudah terupload ke Spreadsheet menjadi file Excel lengkap dengan foto, lalu bagikan ke WhatsApp. Perlu internet. Simpan URL & kode rahasia di atas dulu."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(6))
+        })
+        val rowRekap = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        rowRekap.addView(MaterialButton(this).apply {
+            text = "Unduh Rekap Excel"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(4) }
+            setOnClickListener { rekapUi.dialogUnduh() }
+        })
+        rowRekap.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "Share Excel"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(4) }
+            setOnClickListener { rekapUi.bagikanTerakhir() }
+        })
+        f.addView(rowRekap)
 
         f.addView(section("Bantuan & Diagnosa"))
         val rowHelp = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }

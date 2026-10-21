@@ -17,10 +17,10 @@ const HEADERS = [
   'Waktu', 'Estate', 'Afdeling', 'Blok', 'Activity',
   'Losses: Nama Ancak', 'Losses: Luas CKP (Ha)', 'Losses: Brondol Tinggal (Kg)', 'Losses: Janjang Tinggal (JJG)',
   'Losses: BJR (Kg)', 'Losses: Losses JJG (Kg)', 'Losses: Total Losses (Kg)', 'Losses: Losses/Ha (Kg/Ha)',
-  'Grading: No TPH', 'Grading: Ripe (JJG)', 'Grading: Ripe (%)', 'Grading: Mengkal (JJG)', 'Grading: Mengkal (%)',
+  'Grading: No TPH', 'Grading: Nama Pemanen', 'Grading: Kode Pemanen', 'Grading: Ripe (JJG)', 'Grading: Ripe (%)', 'Grading: Mengkal (JJG)', 'Grading: Mengkal (%)',
   'Grading: Mentah (JJG)', 'Grading: Mentah (%)', 'Grading: Overripe (JJG)', 'Grading: Overripe (%)',
   'Grading: Total JJG', 'Grading: BJR (Kg)', 'Grading: Tonase (Ton)', 'Grading: Brondol (Kg)', 'Grading: Brondol (%)', 'Grading: Koordinat',
-  'Kalibrasi: No TPH', 'Kalibrasi: Jumlah Janjang (JJG)', 'Kalibrasi: Tonase (Kg)', 'Kalibrasi: BJR (Kg)', 'Kalibrasi: Koordinat',
+  'Kalibrasi: No TPH', 'Kalibrasi: Nama Pemanen', 'Kalibrasi: Kode Pemanen', 'Kalibrasi: Jumlah Janjang (JJG)', 'Kalibrasi: Tonase (Kg)', 'Kalibrasi: BJR (Kg)', 'Kalibrasi: Koordinat',
   'Problem / Temuan', 'Perbaikan', 'Cahaya (Lux)', 'Latitude', 'Longitude', 'Koordinat (salin)', 'Link Google Maps',
   'Link Foto', 'Pelapor', 'ID Laporan'
 ];
@@ -29,8 +29,71 @@ const COL_ID = HEADERS.length;
 const PERCENT_COLS = ['Grading: Ripe (%)', 'Grading: Mengkal (%)', 'Grading: Mentah (%)',
                       'Grading: Overripe (%)', 'Grading: Brondol (%)'].map(function (h) { return HEADERS.indexOf(h) + 1; });
 
-function doGet() {
-  return json_({ ok: true, info: 'CKP Report aktif' });
+function doGet(e) {
+  const p = (e && e.parameter) || {};
+  if (!p.action) return json_({ ok: true, info: 'CKP Report aktif' });
+  try {
+    if (p.token !== TOKEN) return json_({ ok: false, error: 'Kode rahasia salah' });
+    if (p.action === 'list') return rekap_(p);
+    if (p.action === 'foto') return foto_(p);
+    return json_({ ok: false, error: 'Aksi tidak dikenal' });
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
+  }
+}
+
+const MAX_BARIS = 500;
+
+function waktuTeks_(v) {
+  if (v instanceof Date) return Utilities.formatDate(v, 'Asia/Makassar', 'yyyy-MM-dd HH:mm:ss');
+  return String(v === undefined || v === null ? '' : v);
+}
+
+/** Ambil baris laporan sesuai filter: from/to (yyyy-MM-dd), estate, afdeling, blok, pelapor. */
+function rekap_(p) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sh || sh.getLastRow() < 2) return json_({ ok: true, headers: HEADERS, rows: [], total: 0, terpotong: false });
+  const data = sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS.length).getValues();
+  const ix = function (h) { return HEADERS.indexOf(h); };
+  const cocok = function (nilai, kunci) {
+    return !kunci || String(nilai).toUpperCase().indexOf(String(kunci).toUpperCase()) >= 0;
+  };
+  const rows = [];
+  let total = 0;
+  for (let i = data.length - 1; i >= 0; i--) {            // terbaru dulu
+    const r = data[i];
+    const w = waktuTeks_(r[0]);
+    const tgl = w.substring(0, 10);
+    if (p.from && tgl < p.from) continue;
+    if (p.to && tgl > p.to) continue;
+    if (!cocok(r[ix('Estate')], p.estate) || !cocok(r[ix('Afdeling')], p.afdeling) || !cocok(r[ix('Blok')], p.blok)) continue;
+    if (p.pelapor && String(r[ix('Pelapor')]).toUpperCase() !== String(p.pelapor).toUpperCase()) continue;
+    total++;
+    if (rows.length < MAX_BARIS) {
+      const v = r.map(function (c) { return c instanceof Date ? waktuTeks_(c) : c; });
+      v[0] = w;
+      rows.push(v);
+    }
+  }
+  rows.reverse();                                          // urut lama -> baru di Excel
+  return json_({ ok: true, headers: HEADERS, rows: rows, total: total, terpotong: total > rows.length });
+}
+
+/** Kirim foto (base64) milik laporan dengan ID tertentu, dibaca dari link Drive di sheet. */
+function foto_(p) {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAME);
+  if (!sh || sh.getLastRow() < 2) return json_({ ok: false, error: 'Data kosong' });
+  const ids = sh.getRange(2, COL_ID, sh.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (ids[i][0] === p.id) {
+      const url = String(sh.getRange(i + 2, COL_FOTO).getValue() || '');
+      const m = url.match(/[-\w]{25,}/);
+      if (!m) return json_({ ok: true, b64: '' });
+      const blob = DriveApp.getFileById(m[0]).getBlob();
+      return json_({ ok: true, b64: Utilities.base64Encode(blob.getBytes()) });
+    }
+  }
+  return json_({ ok: true, b64: '' });
 }
 
 function prepareSheet_(ss) {
@@ -108,10 +171,10 @@ function doPost(e) {
       waktu, d.estate, d.afdeling, d.blok, d.activity || '',
       L.namaAncak || '', num_(L.luas), num_(L.brondol), num_(L.janjang), num_(L.bjr),
       num_(L.lossesJjg), num_(L.total), num_(L.perHa),
-      G.noTph || '', num_(G.ripe), num_(G.pRipe), num_(G.mengkal), num_(G.pMengkal),
+      G.noTph || '', G.namaPemanen || '', G.kodePemanen || '', num_(G.ripe), num_(G.pRipe), num_(G.mengkal), num_(G.pMengkal),
       num_(G.mentah), num_(G.pMentah), num_(G.overripe), num_(G.pOverripe),
       num_(G.total), num_(G.bjr), num_(G.tonase), num_(G.brondol), num_(G.pBrondol), salin_(G.lat, G.lon),
-      K.noTph || '', num_(K.janjang), num_(K.tonaseKg), num_(K.bjr), salin_(K.lat, K.lon),
+      K.noTph || '', K.namaPemanen || '', K.kodePemanen || '', num_(K.janjang), num_(K.tonaseKg), num_(K.bjr), salin_(K.lat, K.lon),
       d.problem, d.perbaikan || '', num_(d.lux), lat, lon, salin, d.mapsUrl, fotoUrl, d.pelapor || '', d.id || ''
     ]);
     const row = sh.getLastRow();

@@ -4,4 +4,5 @@
     <files-path name="reports" path="reports/" />
     <cache-path name="exports" path="exports/" />
     <files-path name="markphotos" path="markphotos/" />
+    <files-path name="rekap" path="rekap/" />
 </paths>

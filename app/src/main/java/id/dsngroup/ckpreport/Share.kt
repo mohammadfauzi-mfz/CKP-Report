@@ -77,4 +77,20 @@ object Share {
         }
         ctx.startActivity(Intent.createChooser(i, title))
     }
+
+    /** Bagikan dokumen (mis. .xlsx) ke WhatsApp (WA biasa -> WA Business -> pilihan aplikasi). */
+    fun dokumen(ctx: Context, f: File, mime: String, teks: String = "") {
+        val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
+        fun build(pkg: String?) = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            if (teks.isNotBlank()) putExtra(Intent.EXTRA_TEXT, teks)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            if (pkg != null) setPackage(pkg)
+        }
+        for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+            try { ctx.startActivity(build(pkg)); return } catch (e: ActivityNotFoundException) {}
+        }
+        ctx.startActivity(Intent.createChooser(build(null), "Bagikan rekap Excel"))
+    }
 }
