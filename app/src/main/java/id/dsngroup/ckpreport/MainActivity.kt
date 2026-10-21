@@ -103,10 +103,11 @@ class MainActivity : AppCompatActivity() {
         startGps()
         if (::tabs.isInitialized && tabs.selectedTabPosition == 2) peta.onShown()
     }
-    private val simpanRekap = registerForActivityResult(ActivityResultContracts.CreateDocument(Rekap.MIME)) { uri ->
-        rekapUi.simpan(uri)
-    }
-    private val rekapUi by lazy { RekapUi(this, prefs) { nama -> simpanRekap.launch(nama) } }
+    private val simpanRekap: androidx.activity.result.ActivityResultLauncher<String> =
+        registerForActivityResult(ActivityResultContracts.CreateDocument(Rekap.MIME)) { uri: Uri? ->
+            rekapUi.simpan(uri)
+        }
+    private val rekapUi: RekapUi by lazy { RekapUi(this, prefs) { nama: String -> simpanRekap.launch(nama) } }
     private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) doImportMap(uri)
     }
