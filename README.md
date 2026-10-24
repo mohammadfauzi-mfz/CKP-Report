@@ -8,3 +8,6 @@ Wajib: tempel ulang `apps-script/Code.gs` ke Apps Script, lalu Deploy > Kelola d
 
 ## v2.5
 Share satu tanda (ketuk tanda di peta > Share): WhatsApp (teks + foto), JSON (bisa diimport lewat Pulihkan Data), KML, KMZ + foto.
+
+## v2.6
+File JSON/KML/KMZ/GPX/GeoJSON/CSV/zip (backup, paket peta, shapefile) dan GeoPDF bisa dibuka atau dibagikan langsung ke CKP Report dari WhatsApp / File Manager (Buka dengan > CKP Report).

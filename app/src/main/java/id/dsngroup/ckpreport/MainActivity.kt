@@ -384,7 +384,32 @@ class MainActivity : AppCompatActivity() {
         }
         if (prefs.getString("url", "").isNullOrBlank()) showSettings()
         if (savedInstanceState == null && !hasLocationPermission()) requestGps()
-        if (savedInstanceState == null) root.post { checkRecoveryAndCrash() }
+        if (savedInstanceState == null) root.post { checkRecoveryAndCrash(); handleIncoming(intent) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncoming(intent)
+    }
+
+    /** File yang dibuka / dibagikan dari WhatsApp, File Manager, dll. langsung ke CKP Report. */
+    private fun handleIncoming(i: Intent?) {
+        if (i == null) return
+        val uri: Uri? = when (i.action) {
+            Intent.ACTION_VIEW -> i.data
+            Intent.ACTION_SEND -> if (android.os.Build.VERSION.SDK_INT >= 33) i.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") i.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            else -> null
+        }
+        if (uri == null) return
+        i.action = null          // jangan diproses ulang saat layar diputar / aplikasi dibuka lagi
+        i.data = null
+        val head = try { contentResolver.openInputStream(uri)?.use { s -> ByteArray(5).also { s.read(it) } } } catch (e: Exception) { null }
+        if (head == null) { toast("File tidak dapat dibuka."); return }
+        peta.refresh()
+        if (head[0] == '%'.code.toByte() && head[1] == 'P'.code.toByte() && head[2] == 'D'.code.toByte()) doImportMap(uri)
+        else doImportTracks(uri)
     }
 
     override fun onStart() {
