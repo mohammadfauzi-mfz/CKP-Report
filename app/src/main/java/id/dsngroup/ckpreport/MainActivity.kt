@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.CreateDocument(Rekap.MIME)) { uri: Uri? ->
             rekapUi.simpan(uri)
         }
+    private val updateUi: UpdateUi by lazy { UpdateUi(this, prefs) }
     private val rekapUi: RekapUi by lazy { RekapUi(this, prefs) { nama: String -> simpanRekap.launch(nama) } }
     private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) doImportMap(uri)
@@ -384,7 +385,7 @@ class MainActivity : AppCompatActivity() {
         }
         if (prefs.getString("url", "").isNullOrBlank()) showSettings()
         if (savedInstanceState == null && !hasLocationPermission()) requestGps()
-        if (savedInstanceState == null) root.post { checkRecoveryAndCrash(); handleIncoming(intent) }
+        if (savedInstanceState == null) root.post { checkRecoveryAndCrash(); handleIncoming(intent); updateUi.cekOtomatis() }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1321,6 +1322,19 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { rekapUi.bagikanTerakhir() }
         })
         f.addView(rowRekap)
+
+        f.addView(section("Pembaruan Aplikasi"))
+        f.addView(TextView(this).apply {
+            text = "Versi terpasang: ${Updater.versiTerpasang(this@MainActivity)}. Pembaruan diunduh langsung dari GitHub; data aplikasi tidak terhapus."
+            textSize = 12f
+            setPadding(0, 0, 0, dp(6))
+        })
+        f.addView(MaterialButton(this).apply {
+            text = "Cek & Perbarui Aplikasi"
+            textSize = 12f
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setOnClickListener { updateUi.cek(false) }
+        })
 
         f.addView(section("Bantuan & Diagnosa"))
         val rowHelp = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }

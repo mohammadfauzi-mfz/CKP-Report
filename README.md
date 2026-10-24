@@ -11,3 +11,6 @@ Share satu tanda (ketuk tanda di peta > Share): WhatsApp (teks + foto), JSON (bi
 
 ## v2.6
 File JSON/KML/KMZ/GPX/GeoJSON/CSV/zip (backup, paket peta, shapefile) dan GeoPDF bisa dibuka atau dibagikan langsung ke CKP Report dari WhatsApp / File Manager (Buka dengan > CKP Report).
+
+## v2.7 - Pembaruan dari GitHub
+Pengaturan > "Cek & Perbarui Aplikasi". Setiap build di GitHub Actions otomatis membuat Release `v<versionName>` berisi APK. Aplikasi membaca Release terbaru (repo `mohammadfauzi-mfz/CKP-Report`, harus publik), mengunduh APK, lalu memasangnya. Naikkan `versionName` di app/build.gradle.kts setiap rilis. Pengecekan otomatis sekali sehari saat aplikasi dibuka.
