@@ -5,3 +5,6 @@ Penghubung Google Sheets + Drive: `apps-script/Code.gs` (lihat panduan di chat).
 ## v2.4 - Rekap Excel
 Menu Pengaturan > "Unduh Rekap Excel" menarik laporan terupload dari Spreadsheet (lengkap dengan foto) menjadi file .xlsx, lalu "Share Excel" ke WhatsApp.
 Wajib: tempel ulang `apps-script/Code.gs` ke Apps Script, lalu Deploy > Kelola deployment > Edit > Versi baru (URL tetap sama). Isi TOKEN sama seperti sebelumnya.
+
+## v2.5
+Share satu tanda (ketuk tanda di peta > Share): WhatsApp (teks + foto), JSON (bisa diimport lewat Pulihkan Data), KML, KMZ + foto.

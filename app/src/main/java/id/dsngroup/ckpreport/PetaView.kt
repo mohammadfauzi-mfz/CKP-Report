@@ -653,8 +653,45 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 }
             )
             .setPositiveButton("Edit") { _, _ -> editor(m, m.lat, m.lon, null) }
-            .setNegativeButton("Share WA") { _, _ -> Share.textWithPhoto(context, MarkingText.pesan(m), pf) }
+            .setNegativeButton("Share") { _, _ -> shareTanda(m, pf) }
             .setNeutralButton("Navigasi") { _, _ -> navigasi(m.lat, m.lon) }
+            .show()
+    }
+
+    /** Pilihan format berbagi satu tanda: WhatsApp (teks + foto), JSON, KML, KMZ + foto. */
+    private fun shareTanda(m: Marker, pf: File?) {
+        val labels = arrayOf(
+            "WhatsApp (teks + foto)",
+            "File JSON (bisa diimport kembali ke aplikasi)",
+            "File KML (Google Earth, QGIS, ArcGIS)",
+            "File KMZ + foto (Google Earth, QGIS, ArcGIS)",
+        )
+        MaterialAlertDialogBuilder(context)
+            .setTitle("Share tanda: ${m.title}")
+            .setItems(labels) { _, i ->
+                when (i) {
+                    0 -> Share.textWithPhoto(context, MarkingText.pesan(m), pf)
+                    1 -> try {
+                        val f = File(exportDir(), "tanda_${m.title.replace(Regex("[^A-Za-z0-9]+"), "-").trim('-').take(30).ifEmpty { "titik" }}_${stamp()}.json")
+                        f.writeText(DataIO.exportAll(emptyList(), listOf(m), context))
+                        Share.file(context, f, "application/json", "Bagikan tanda (JSON)")
+                    } catch (e: Exception) {
+                        toast("Gagal membagikan: ${e.message}")
+                    }
+                    else -> {
+                        val format = if (i == 2) Gis.Format.KML else Gis.Format.KMZ
+                        val app = context
+                        Thread {
+                            val f = try { Gis.export(app, format, listOf(m), emptyList(), exportDir()) } catch (e: Exception) { null }
+                            post {
+                                if (f != null) Share.file(app, f, format.mime, "Bagikan ${format.ext.uppercase()}")
+                                else toast("Gagal membuat file ${format.ext.uppercase()}")
+                            }
+                        }.start()
+                    }
+                }
+            }
+            .setNegativeButton("Batal", null)
             .show()
     }
 
