@@ -3,6 +3,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main, master ]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -29,3 +31,15 @@ jobs:
         with:
           name: CKPReport-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Publikasikan rilis (dipakai fitur pembaruan di aplikasi)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
+          cp app/build/outputs/apk/debug/app-debug.apk "CKPReport-$VER.apk"
+          if gh release view "v$VER" >/dev/null 2>&1; then
+            gh release upload "v$VER" "CKPReport-$VER.apk" --clobber
+          else
+            gh release create "v$VER" "CKPReport-$VER.apk" --title "CKP Report $VER" --notes "CKP Report versi $VER" --latest
+          fi
