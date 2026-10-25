@@ -667,14 +667,24 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         val jarak = if (l != null) "\nJarak dari Anda: " + Geo.meter(Geo.dist(TPoint(l.latitude, l.longitude, 0), TPoint(m.lat, m.lon, 0))) else ""
         val pf = if (m.photo.isNotBlank()) MarkerStore.photoFile(context, m.id).takeIf { it.exists() } else null
         val dlgB = MaterialAlertDialogBuilder(context)
+        var dlgRef: androidx.appcompat.app.AlertDialog? = null
+        val body = LinearLayout(context)
+        body.orientation = VERTICAL
         if (pf != null) {
             val iv = ImageView(context)
             iv.adjustViewBounds = true
             iv.scaleType = ImageView.ScaleType.FIT_CENTER
             iv.setPadding(dp(16), dp(8), dp(16), 0)
             iv.setImageBitmap(ImageUtil.thumb(pf, 900))
-            dlgB.setView(iv)
+            body.addView(iv)
         }
+        val bt = MaterialButton(context)
+        bt.text = "👥 Kirim ke Tim sebagai Temuan"
+        bt.isAllCaps = false
+        bt.layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { setMargins(dp(16), dp(10), dp(16), 0) }
+        bt.setOnClickListener { dlgRef?.dismiss(); kirimKeTim(m) }
+        body.addView(bt)
+        dlgB.setView(body)
         dlgB
             .setTitle("${ic.emoji} ${m.title}")
             .setMessage(
@@ -693,7 +703,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             .setPositiveButton("Edit") { _, _ -> editor(m, m.lat, m.lon, null) }
             .setNegativeButton("Share") { _, _ -> shareTanda(m, pf) }
             .setNeutralButton("Navigasi") { _, _ -> navigasi(m.lat, m.lon) }
-            .show()
+            .create().also { dlgRef = it }.show()
     }
 
     /** Pilihan format berbagi satu tanda: WhatsApp (teks + foto), JSON, KML, KMZ + foto. */
@@ -890,6 +900,33 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             target != null -> act()
             else -> { pending = act; showMap(MapCanvasView.plainMap(lat, lon)) }
         }
+    }
+
+    /** Jadikan tanda pribadi sebagai temuan tim (tanya Estate/Afdeling, lalu kirim). */
+    private fun kirimKeTim(m: Marker) {
+        if (!Tim.aktif(context)) { toast("Isi NPK dan URL Web App di Pengaturan dulu."); return }
+        val u = Tim.userCache(context)
+        val estDef = prefs.getString("tm_est", null) ?: u?.estate?.firstOrNull { !it.equals("SEMUA", true) } ?: ""
+        val afdDef = prefs.getString("tm_afd", null) ?: u?.afdeling?.firstOrNull { !it.equals("SEMUA", true) } ?: ""
+        val col = LinearLayout(context)
+        col.orientation = VERTICAL
+        col.setPadding(dp(20), dp(8), dp(20), 0)
+        val (tilE, eE) = inputField(context, "Estate", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, estDef)
+        val (tilA, eA) = inputField(context, "Afdeling", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, afdDef)
+        col.addView(tilE); col.addView(tilA)
+        MaterialAlertDialogBuilder(context).setTitle("Kirim ke Tim: ${m.title}")
+            .setView(col)
+            .setPositiveButton("Kirim") { _, _ ->
+                val est = eE.text.toString().trim().uppercase()
+                val afd = eA.text.toString().trim().uppercase()
+                if (est.isEmpty() || afd.isEmpty()) { toast("Estate dan Afdeling wajib diisi."); return@setPositiveButton }
+                prefs.edit().putString("tm_est", est).putString("tm_afd", afd).apply()
+                TimView.dariTanda(context, m, est, afd)
+                toast("Dikirim ke Tim")
+                reloadOverlays(); updateTimTab()
+                timView.sinkron(true)
+            }
+            .setNegativeButton("Batal", null).show()
     }
 
     private fun navigasi(lat: Double, lon: Double) {
