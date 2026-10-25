@@ -188,7 +188,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             l != null -> Pair(l.latitude, l.longitude)
             else -> { toast("Posisi belum ada. Nyalakan GPS atau pilih titik di peta dulu."); selectPane(0); return }
         }
-        editor(null, la, lo, null, null, true)
+        editor(null, la, lo, null, true)
     }
 
     /** Dipanggil saat tab Peta (utama) ditampilkan. */
@@ -909,7 +909,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     // Editor tanda
     // =====================================================================
 
-    private fun editor(existing: Marker?, lat: Double, lon: Double, preset: Marker?, onSaved: (() -> Unit)? = null, forceTim: Boolean = false) {
+    private fun editor(existing: Marker?, lat: Double, lon: Double, preset: Marker?, forceTim: Boolean = false, onSaved: (() -> Unit)? = null) {
         val src = existing ?: preset
         var iconKey = src?.icon ?: "warn"
         val col = LinearLayout(context)
