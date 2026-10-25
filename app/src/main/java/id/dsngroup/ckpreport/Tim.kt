@@ -44,6 +44,7 @@ data class Temuan(
 /** Pengguna yang login lewat NPK (hasil verifikasi server). */
 data class TimUser(val npk: String, val nama: String, val peran: String, val luas: Boolean, val estate: List<String>, val afdeling: List<String>) {
     val supervisi: Boolean get() = luas || peran.equals("Supervisi", true)
+    val admin: Boolean get() = peran.equals("Admin", true)
 }
 
 object Tim {
@@ -122,6 +123,29 @@ object Tim {
             c.outputStream.use { it.write(data.toString().toByteArray(Charsets.UTF_8)) }
             return baca(c)
         } catch (e: Gagal) { throw e } catch (e: Exception) { throw Gagal("NET", "Tidak ada koneksi / sinyal lemah") } finally { conn?.disconnect() }
+    }
+
+    // ---------- kelola pengguna (Admin) ----------
+
+    class Pengguna(val npk: String, val nama: String, val peran: String, val estate: String, val afdeling: String)
+
+    fun daftarPengguna(ctx: Context): List<Pengguna> {
+        val a = get(ctx, "tm_users", readMs = 30000).optJSONArray("rows") ?: return emptyList()
+        val out = ArrayList<Pengguna>()
+        for (i in 0 until a.length()) {
+            val o = a.optJSONObject(i) ?: continue
+            out.add(Pengguna(o.optString("npk"), o.optString("nama"), o.optString("peran"), o.optString("estate"), o.optString("afdeling")))
+        }
+        return out
+    }
+
+    fun simpanPengguna(ctx: Context, p: Pengguna) {
+        post(ctx, "tm_user_set", JSONObject().put("target", p.npk).put("nama", p.nama).put("peran", p.peran)
+            .put("estate", p.estate).put("afdeling", p.afdeling))
+    }
+
+    fun hapusPengguna(ctx: Context, npk: String) {
+        post(ctx, "tm_user_del", JSONObject().put("target", npk))
     }
 
     /** Verifikasi NPK ke server dan simpan profilnya. */

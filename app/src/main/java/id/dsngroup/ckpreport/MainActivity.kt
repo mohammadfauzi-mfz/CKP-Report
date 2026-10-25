@@ -1273,6 +1273,12 @@ class MainActivity : AppCompatActivity() {
             text = if (u != null) "Masuk sebagai ${u.nama} (${u.peran})" else "NPK harus terdaftar di sheet \"Pengguna\". Dipakai untuk temuan bersama tim."
         }
         f.addView(lblNpk)
+        if (Tim.userCache(this)?.admin == true) f.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = "👤 Kelola Pengguna Tim (Admin)"
+            textSize = 12f
+            isAllCaps = false
+            setOnClickListener { PenggunaUi(this@MainActivity).tampil() }
+        })
 
         f.addView(section("Peta Offline (untuk Tracking)"))
         val lblMap = TextView(this).apply { text = mapLabel(); textSize = 13f; setPadding(0, 0, 0, dp(6)) }

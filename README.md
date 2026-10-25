@@ -22,6 +22,8 @@ Temuan bersama satu afdeling: siapa pun bisa menandai temuan, anggota lain langs
 3. Di aplikasi: Pengaturan > Tim Afdeling > isi NPK > Simpan.
 4. Tab Peta > **Tim**: daftar temuan, filter, Tandai Tuntas (foto + catatan), Share WA. Saat menandai di peta, centang "Kirim ke Tim".
 
+**Admin** juga punya menu Pengaturan > Kelola Pengguna Tim: tambah, ubah, dan hapus pengguna langsung dari HP (tanpa membuka spreadsheet). Hanya peran Admin yang bisa; NPK Admin pertama tetap diisi manual di sheet Pengguna.
+
 Titik merah = outstanding, hijau = tuntas. Sheet "Temuan" dibuat otomatis.
 
 ## v2.7 - Pembaruan dari GitHub

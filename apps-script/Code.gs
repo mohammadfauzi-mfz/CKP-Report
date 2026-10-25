@@ -39,6 +39,7 @@ function doGet(e) {
     if (p.action === 'tm_me') return tmMe_(p);
     if (p.action === 'tm_list') return tmList_(p);
     if (p.action === 'tm_foto') return tmFoto_(p);
+    if (p.action === 'tm_users') return tmUsers_(p);
     return json_({ ok: false, error: 'Aksi tidak dikenal' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -354,6 +355,63 @@ function tmMe_(p) {
   return json_({ ok: true, user: tmUserInfo_(a.u) });
 }
 
+// ---------- kelola pengguna (khusus peran Admin) ----------
+
+const PERAN_OK = ['ANGGOTA', 'SUPERVISI', 'MANAGER', 'ADMIN'];
+
+function tmAdmin_(u) { return String(u.peran).toUpperCase() === 'ADMIN'; }
+
+function tmUsers_(p) {
+  const a = tmAuth_(p);
+  if (a.err) return a.err;
+  if (!tmAdmin_(a.u)) return json_({ ok: false, code: 'FORBIDDEN', error: 'Hanya Admin yang boleh mengelola pengguna' });
+  const sh = tmSheet_(SHEET_USER, HEADERS_U);
+  const rows = [];
+  if (sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_U.length).getValues().forEach(function (r) {
+      if (String(r[0]).trim() === '') return;
+      rows.push({ npk: String(r[0]).trim(), nama: String(r[1]).trim(), peran: String(r[2] || 'Anggota').trim(),
+                  estate: String(r[3] || '').trim(), afdeling: String(r[4] || '').trim() });
+    });
+  }
+  return json_({ ok: true, rows: rows });
+}
+
+function tmUserPost_(d, u) {
+  if (!tmAdmin_(u)) return json_({ ok: false, code: 'FORBIDDEN', error: 'Hanya Admin yang boleh mengelola pengguna' });
+  const sh = tmSheet_(SHEET_USER, HEADERS_U);
+  const npk = String(d.target === undefined || d.target === null ? '' : d.target).trim().toUpperCase();
+  if (!npk) return json_({ ok: false, code: 'DATA', error: 'NPK pengguna wajib diisi' });
+  // cari baris
+  let rn = 0;
+  if (sh.getLastRow() >= 2) {
+    const col = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+    for (let i = 0; i < col.length; i++) if (normNpk_(col[i][0]) === normNpk_(npk)) { rn = i + 2; break; }
+  }
+  if (d.action === 'tm_user_del') {
+    if (normNpk_(npk) === normNpk_(u.npk)) return json_({ ok: false, code: 'DATA', error: 'Tidak bisa menghapus akun sendiri' });
+    if (!rn) return json_({ ok: false, code: 'DATA', error: 'NPK tidak ditemukan' });
+    sh.deleteRow(rn);
+    return json_({ ok: true });
+  }
+  const nama = String(d.nama || '').trim();
+  const peranU = String(d.peran || 'Anggota').trim().toUpperCase();
+  if (!nama) return json_({ ok: false, code: 'DATA', error: 'Nama wajib diisi' });
+  if (PERAN_OK.indexOf(peranU) < 0) return json_({ ok: false, code: 'DATA', error: 'Peran tidak dikenal' });
+  const peran = peranU.charAt(0) + peranU.slice(1).toLowerCase();
+  const luas = (peranU === 'MANAGER' || peranU === 'ADMIN');
+  const estate = String(d.estate || '').trim().toUpperCase();
+  const afdeling = String(d.afdeling || '').trim().toUpperCase();
+  if (!luas && (!estate || !afdeling)) return json_({ ok: false, code: 'DATA', error: 'Estate dan Afdeling wajib diisi (atau SEMUA)' });
+  if (rn && normNpk_(npk) === normNpk_(u.npk) && peranU !== 'ADMIN') {
+    return json_({ ok: false, code: 'DATA', error: 'Tidak bisa menurunkan peran akun sendiri' });
+  }
+  if (!rn) rn = Math.max(sh.getLastRow(), 1) + 1;
+  sh.getRange(rn, 1).setNumberFormat('@');
+  sh.getRange(rn, 1, 1, HEADERS_U.length).setValues([[npk, nama, peran, luas && !estate ? 'SEMUA' : estate, luas && !afdeling ? 'SEMUA' : afdeling]]);
+  return json_({ ok: true });
+}
+
 /** Daftar temuan yang boleh dilihat pengguna, yang diubah setelah `since` (ms). */
 function tmList_(p) {
   const a = tmAuth_(p);
@@ -395,6 +453,7 @@ function tmPost_(d) {
     const a = tmAuth_(d);
     if (a.err) return a.err;
     const u = a.u;
+    if (d.action === 'tm_user_set' || d.action === 'tm_user_del') return tmUserPost_(d, u);
     const sh = tmSheet_(SHEET_TEMUAN, HEADERS_T);
     const now = new Date().getTime();
 
