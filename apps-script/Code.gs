@@ -36,6 +36,9 @@ function doGet(e) {
     if (p.token !== TOKEN) return json_({ ok: false, error: 'Kode rahasia salah' });
     if (p.action === 'list') return rekap_(p);
     if (p.action === 'foto') return foto_(p);
+    if (p.action === 'tm_me') return tmMe_(p);
+    if (p.action === 'tm_list') return tmList_(p);
+    if (p.action === 'tm_foto') return tmFoto_(p);
     return json_({ ok: false, error: 'Aksi tidak dikenal' });
   } catch (err) {
     return json_({ ok: false, error: String(err) });
@@ -127,6 +130,11 @@ function doPost(e) {
     const d = JSON.parse(e.postData.contents);
     if (d.token !== TOKEN) return json_({ ok: false, error: 'Kode rahasia salah' });
 
+    if (d.action && String(d.action).indexOf('tm_') === 0) {
+      lock.waitLock(30000);
+      return tmPost_(d);
+    }
+
     lock.waitLock(30000);
     const tz = 'Asia/Makassar';
 
@@ -206,4 +214,254 @@ function clean_(s) {
 
 function json_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// =====================================================================
+// TIM: temuan bersama per afdeling (login dengan NPK)
+// Sheet "Pengguna": NPK | Nama | Peran | Estate | Afdeling
+//   Peran   : Anggota, Supervisi, Manager, Admin  (Manager & Admin melihat SEMUA estate/afdeling)
+//   Estate / Afdeling : nama (boleh beberapa, pisahkan koma) atau SEMUA
+// Sheet "Temuan": dibuat otomatis.
+// =====================================================================
+
+const SHEET_USER = 'Pengguna';
+const SHEET_TEMUAN = 'Temuan';
+const HEADERS_U = ['NPK', 'Nama', 'Peran', 'Estate', 'Afdeling'];
+const HEADERS_T = [
+  'ID', 'Waktu', 'Estate', 'Afdeling', 'Blok', 'Judul', 'Ikon', 'Keterangan', 'Volume', 'Satuan',
+  'Latitude', 'Longitude', 'Akurasi (m)', 'Pembuat NPK', 'Pembuat', 'Status', 'Waktu Tuntas',
+  'Penyelesai NPK', 'Penyelesai', 'Catatan Perbaikan', 'Foto Temuan', 'Foto Perbaikan',
+  'Diubah (ms)', 'Dihapus', 'WaktuMs', 'TuntasMs', 'Koordinat (salin)', 'Link Google Maps'
+];
+const TC = {};
+HEADERS_T.forEach(function (h, i) { TC[h] = i; });
+
+function tmSheet_(nama, headers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(nama);
+  if (!sh) sh = ss.insertSheet(nama);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(headers);
+    sh.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function normNpk_(v) {
+  return String(v === undefined || v === null ? '' : v).trim().toUpperCase().replace(/^0+(?=.)/, '');
+}
+
+function daftar_(v) {
+  return String(v === undefined || v === null ? '' : v).split(/[,;]+/).map(function (x) {
+    return x.trim().toUpperCase();
+  }).filter(function (x) { return x; });
+}
+
+function semua_(list) { return list.indexOf('SEMUA') >= 0 || list.indexOf('ALL') >= 0; }
+
+/** Cari pengguna dari NPK. null bila tidak terdaftar. */
+function tmUser_(npk) {
+  const n = normNpk_(npk);
+  if (!n) return null;
+  const sh = tmSheet_(SHEET_USER, HEADERS_U);
+  if (sh.getLastRow() < 2) return null;
+  const data = sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_U.length).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (normNpk_(data[i][0]) === n) {
+      const peran = String(data[i][2] || 'Anggota').trim();
+      const pu = peran.toUpperCase();
+      const luas = (pu === 'MANAGER' || pu === 'ADMIN');
+      return {
+        npk: String(data[i][0]).trim(), nama: String(data[i][1]).trim(), peran: peran,
+        luas: luas, estate: daftar_(data[i][3]), afdeling: daftar_(data[i][4]),
+        supervisi: (pu === 'SUPERVISI' || luas), admin: luas
+      };
+    }
+  }
+  return null;
+}
+
+function tmBolehLihat_(u, est, afd) {
+  if (u.luas) return true;
+  const e = String(est || '').trim().toUpperCase();
+  const a = String(afd || '').trim().toUpperCase();
+  const okE = semua_(u.estate) || u.estate.indexOf(e) >= 0;
+  const okA = semua_(u.afdeling) || u.afdeling.indexOf(a) >= 0;
+  return okE && okA;
+}
+
+function tmUserInfo_(u) {
+  return { npk: u.npk, nama: u.nama, peran: u.peran, luas: u.luas, estate: u.estate, afdeling: u.afdeling };
+}
+
+/** Pastikan token tim + NPK sah. Mengembalikan {u} atau {err}. */
+function tmAuth_(p) {
+  if (p.token !== TOKEN) return { err: json_({ ok: false, code: 'AUTH', error: 'Kode rahasia salah' }) };
+  const u = tmUser_(p.npk);
+  if (!u) return { err: json_({ ok: false, code: 'NPK', error: 'NPK tidak terdaftar. Hubungi admin untuk didaftarkan di sheet Pengguna.' }) };
+  return { u: u };
+}
+
+function tmMs_(v) { return v === '' || v === undefined || v === null ? 0 : Number(v); }
+
+function tmText_(ms) {
+  return ms ? Utilities.formatDate(new Date(ms), 'Asia/Makassar', 'yyyy-MM-dd HH:mm:ss') : '';
+}
+
+function tmRowObj_(r) {
+  return {
+    id: String(r[TC['ID']]), waktu: tmMs_(r[TC['WaktuMs']]), est: String(r[TC['Estate']]), afd: String(r[TC['Afdeling']]),
+    blok: String(r[TC['Blok']]), judul: String(r[TC['Judul']]), icon: String(r[TC['Ikon']] || 'warn'),
+    ket: String(r[TC['Keterangan']]), volume: Number(r[TC['Volume']]) || 0, satuan: String(r[TC['Satuan']]),
+    lat: Number(r[TC['Latitude']]), lon: Number(r[TC['Longitude']]),
+    acc: r[TC['Akurasi (m)']] === '' ? -1 : Number(r[TC['Akurasi (m)']]),
+    pNpk: String(r[TC['Pembuat NPK']]), pNama: String(r[TC['Pembuat']]),
+    status: String(r[TC['Status']] || 'OUTSTANDING'), tuntas: tmMs_(r[TC['TuntasMs']]),
+    sNpk: String(r[TC['Penyelesai NPK']]), sNama: String(r[TC['Penyelesai']]),
+    catatan: String(r[TC['Catatan Perbaikan']]),
+    fotoT: !!r[TC['Foto Temuan']], fotoP: !!r[TC['Foto Perbaikan']],
+    upd: tmMs_(r[TC['Diubah (ms)']]), del: String(r[TC['Dihapus']]) === '1'
+  };
+}
+
+function tmCari_(sh, id) {
+  if (sh.getLastRow() < 2) return -1;
+  const ids = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) if (String(ids[i][0]) === String(id)) return i + 2;
+  return -1;
+}
+
+function tmRow_(sh, rowNo) {
+  return sh.getRange(rowNo, 1, 1, HEADERS_T.length).getValues()[0];
+}
+
+function tmSimpanFoto_(b64, nama) {
+  const blob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/jpeg', nama);
+  const file = getFolder_().createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e1) {
+    try { file.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); } catch (e2) {}
+  }
+  return file.getUrl();
+}
+
+function tmMe_(p) {
+  const a = tmAuth_(p);
+  if (a.err) return a.err;
+  return json_({ ok: true, user: tmUserInfo_(a.u) });
+}
+
+/** Daftar temuan yang boleh dilihat pengguna, yang diubah setelah `since` (ms). */
+function tmList_(p) {
+  const a = tmAuth_(p);
+  if (a.err) return a.err;
+  const u = a.u;
+  const since = Number(p.since) || 0;
+  const sh = tmSheet_(SHEET_TEMUAN, HEADERS_T);
+  const now = new Date().getTime();
+  const out = [];
+  if (sh.getLastRow() >= 2) {
+    const data = sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_T.length).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const r = data[i];
+      if (tmMs_(r[TC['Diubah (ms)']]) <= since) continue;
+      if (!tmBolehLihat_(u, r[TC['Estate']], r[TC['Afdeling']])) continue;
+      out.push(tmRowObj_(r));
+    }
+  }
+  return json_({ ok: true, user: tmUserInfo_(u), now: now, rows: out });
+}
+
+function tmFoto_(p) {
+  const a = tmAuth_(p);
+  if (a.err) return a.err;
+  const sh = tmSheet_(SHEET_TEMUAN, HEADERS_T);
+  const rn = tmCari_(sh, p.id);
+  if (rn < 0) return json_({ ok: true, b64: '' });
+  const r = tmRow_(sh, rn);
+  if (!tmBolehLihat_(a.u, r[TC['Estate']], r[TC['Afdeling']])) return json_({ ok: false, code: 'FORBIDDEN', error: 'Tidak boleh melihat temuan ini' });
+  const url = String(r[TC[p.jenis === 'p' ? 'Foto Perbaikan' : 'Foto Temuan']] || '');
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) return json_({ ok: true, b64: '' });
+  return json_({ ok: true, b64: Utilities.base64Encode(DriveApp.getFileById(m[0]).getBlob().getBytes()) });
+}
+
+/** Tulis (create/status/hapus). Dipanggil dalam lock. */
+function tmPost_(d) {
+  try {
+    const a = tmAuth_(d);
+    if (a.err) return a.err;
+    const u = a.u;
+    const sh = tmSheet_(SHEET_TEMUAN, HEADERS_T);
+    const now = new Date().getTime();
+
+    if (d.action === 'tm_create') {
+      const ada = tmCari_(sh, d.id);
+      if (ada > 0) return json_({ ok: true, duplicate: true, row: tmRowObj_(tmRow_(sh, ada)) });   // kiriman ulang: jangan dobel
+      if (!d.judul || !String(d.judul).trim()) return json_({ ok: false, code: 'DATA', error: 'Judul kosong' });
+      if (!d.est || !d.afd) return json_({ ok: false, code: 'DATA', error: 'Estate dan Afdeling wajib diisi' });
+      if (!tmBolehLihat_(u, d.est, d.afd)) return json_({ ok: false, code: 'FORBIDDEN', error: 'Anda tidak terdaftar di ' + d.est + ' / ' + d.afd });
+      const waktuMs = Number(d.waktu) || now;
+      let fotoUrl = '';
+      if (d.fotoBase64) fotoUrl = tmSimpanFoto_(d.fotoBase64, 'TMN_' + d.id + '_t.jpg');
+      const row = new Array(HEADERS_T.length).fill('');
+      row[TC['ID']] = d.id; row[TC['Waktu']] = tmText_(waktuMs); row[TC['Estate']] = String(d.est).trim().toUpperCase();
+      row[TC['Afdeling']] = String(d.afd).trim().toUpperCase(); row[TC['Blok']] = d.blok || ''; row[TC['Judul']] = d.judul;
+      row[TC['Ikon']] = d.icon || 'warn'; row[TC['Keterangan']] = d.ket || '';
+      row[TC['Volume']] = d.volume === '' || d.volume === undefined ? '' : Number(d.volume); row[TC['Satuan']] = d.satuan || '';
+      row[TC['Latitude']] = Number(d.lat); row[TC['Longitude']] = Number(d.lon);
+      row[TC['Akurasi (m)']] = (d.acc === undefined || d.acc === null || Number(d.acc) < 0) ? '' : Number(d.acc);
+      row[TC['Pembuat NPK']] = u.npk; row[TC['Pembuat']] = u.nama; row[TC['Status']] = 'OUTSTANDING';
+      row[TC['Foto Temuan']] = fotoUrl; row[TC['Diubah (ms)']] = now; row[TC['Dihapus']] = '';
+      row[TC['WaktuMs']] = waktuMs;
+      row[TC['Koordinat (salin)']] = Number(d.lat).toFixed(6) + ',' + Number(d.lon).toFixed(6);
+      row[TC['Link Google Maps']] = 'https://www.google.com/maps?q=' + Number(d.lat).toFixed(6) + ',' + Number(d.lon).toFixed(6);
+      sh.appendRow(row);
+      const rn = sh.getLastRow();
+      sh.getRange(rn, TC['Koordinat (salin)'] + 1).setNumberFormat('@').setValue(row[TC['Koordinat (salin)']]);
+      return json_({ ok: true, row: tmRowObj_(tmRow_(sh, rn)) });
+    }
+
+    const rn = tmCari_(sh, d.id);
+    if (rn < 0) return json_({ ok: false, code: 'NOTFOUND', error: 'Temuan tidak ditemukan di server' });
+    const r = tmRow_(sh, rn);
+    if (!tmBolehLihat_(u, r[TC['Estate']], r[TC['Afdeling']])) return json_({ ok: false, code: 'FORBIDDEN', error: 'Tidak boleh mengubah temuan ini' });
+
+    if (d.action === 'tm_status') {
+      const baru = String(d.status).toUpperCase() === 'TUNTAS' ? 'TUNTAS' : 'OUTSTANDING';
+      if (baru === 'TUNTAS') {
+        let fotoUrl = String(r[TC['Foto Perbaikan']] || '');
+        if (d.fotoBase64) fotoUrl = tmSimpanFoto_(d.fotoBase64, 'TMN_' + d.id + '_p.jpg');
+        const tMs = Number(d.waktuTuntas) || now;
+        r[TC['Status']] = 'TUNTAS'; r[TC['Waktu Tuntas']] = tmText_(tMs); r[TC['TuntasMs']] = tMs;
+        r[TC['Penyelesai NPK']] = u.npk; r[TC['Penyelesai']] = u.nama;
+        r[TC['Catatan Perbaikan']] = d.catatan || ''; r[TC['Foto Perbaikan']] = fotoUrl;
+      } else {
+        r[TC['Status']] = 'OUTSTANDING'; r[TC['Waktu Tuntas']] = ''; r[TC['TuntasMs']] = '';
+        r[TC['Penyelesai NPK']] = ''; r[TC['Penyelesai']] = ''; r[TC['Catatan Perbaikan']] = '';
+        r[TC['Foto Perbaikan']] = '';
+      }
+      r[TC['Diubah (ms)']] = now;
+      sh.getRange(rn, 1, 1, HEADERS_T.length).setValues([r]);
+      sh.getRange(rn, TC['Koordinat (salin)'] + 1).setNumberFormat('@');
+      return json_({ ok: true, row: tmRowObj_(tmRow_(sh, rn)) });
+    }
+
+    if (d.action === 'tm_hapus') {
+      const pembuat = normNpk_(r[TC['Pembuat NPK']]) === normNpk_(u.npk);
+      if (!(u.supervisi || pembuat)) return json_({ ok: false, code: 'FORBIDDEN', error: 'Hanya pembuat atau supervisi yang boleh menghapus' });
+      r[TC['Dihapus']] = '1'; r[TC['Diubah (ms)']] = now;
+      sh.getRange(rn, 1, 1, HEADERS_T.length).setValues([r]);
+      return json_({ ok: true, row: tmRowObj_(tmRow_(sh, rn)) });
+    }
+
+    return json_({ ok: false, code: 'DATA', error: 'Aksi tidak dikenal' });
+  } catch (err) {
+    return json_({ ok: false, code: 'ERR', error: String(err) });
+  } finally {
+    try { LockService.getScriptLock().releaseLock(); } catch (x) {}
+  }
 }

@@ -63,6 +63,15 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     private val mapPane = LinearLayout(context)
     private val historyPane = LinearLayout(context)
     private val rekapPane = LinearLayout(context)
+    private val timEnv = object : TimEnv {
+        override fun lokasi(): Location? = lastLoc
+        override fun keBpeta(lat: Double, lon: Double) { goTo(lat, lon) }
+        override fun navigasi(lat: Double, lon: Double) { this@PetaView.navigasi(lat, lon) }
+        override fun pickPhoto(camera: Boolean, onResult: (File?) -> Unit) { host.pickPhoto(camera, onResult) }
+        override fun temuanBaru() { this@PetaView.temuanBaru() }
+        override fun petaBerubah() { reloadOverlays(); updateTimTab() }
+    }
+    private val timView = TimView(context, timEnv)
 
     // peta
     private val canvas = MapCanvasView(context)
@@ -111,6 +120,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         tabs.addTab(tabs.newTab().setText("Peta"))
         tabs.addTab(tabs.newTab().setText("Riwayat"))
         tabs.addTab(tabs.newTab().setText("Rekap"))
+        tabs.addTab(tabs.newTab().setText("Tim"))
         tabs.tabMode = TabLayout.MODE_FIXED
         addView(tabs)
         addView(pane, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -120,7 +130,9 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         pane.addView(mapPane)
         pane.addView(historyPane)
         pane.addView(rekapPane)
+        pane.addView(timView)
         selectPane(0)
+        updateTimTab()
         tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) { selectPane(tab.position) }
             override fun onTabUnselected(tab: TabLayout.Tab) {}
@@ -151,9 +163,32 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         mapPane.visibility = if (i == 0) View.VISIBLE else View.GONE
         historyPane.visibility = if (i == 1) View.VISIBLE else View.GONE
         rekapPane.visibility = if (i == 2) View.VISIBLE else View.GONE
+        timView.visibility = if (i == 3) View.VISIBLE else View.GONE
         if (tabs.selectedTabPosition != i) tabs.getTabAt(i)?.select()
         if (i == 1) refreshHistory()
         if (i == 2) refreshRekap()
+        if (i == 3) timView.onShown()
+    }
+
+    /** Label tab Tim memuat jumlah temuan yang masih outstanding. */
+    private fun updateTimTab() {
+        val n = TemuanStore.all(context).count { it.sync != "D" && !it.tuntas }
+        tabs.getTabAt(3)?.text = if (n > 0) "Tim ($n)" else "Tim"
+    }
+
+    /** Sinkron senyap (dipanggil saat aplikasi dibuka). */
+    fun sinkronTim() { if (Tim.aktif(context)) timView.sinkron(true) }
+
+    private fun temuanBaru() {
+        if (!Tim.aktif(context)) { toast("Isi NPK dan URL Web App di Pengaturan dulu."); return }
+        val l = lastLoc
+        val sel = selected
+        val (la, lo) = when {
+            sel != null -> sel
+            l != null -> Pair(l.latitude, l.longitude)
+            else -> { toast("Posisi belum ada. Nyalakan GPS atau pilih titik di peta dulu."); selectPane(0); return }
+        }
+        editor(null, la, lo, null, null, true)
     }
 
     /** Dipanggil saat tab Peta (utama) ditampilkan. */
@@ -480,7 +515,9 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
 
     private fun reloadOverlays() {
         val m = curMap ?: return
-        canvas.setMarkers(MarkerStore.all(context))
+        val tem = TemuanStore.all(context).filter { it.sync != "D" }
+        val ids = tem.map { it.id }.toSet()
+        canvas.setMarkers(MarkerStore.all(context).filter { it.id !in ids } + tem.map { TemuanStore.sebagaiMarker(it) })
         canvas.setHistory(TrackStore.all(context).filter { r ->
             r.points.isNotEmpty() && m.contains(r.points[r.points.size / 2].lat, r.points[r.points.size / 2].lon)
         }.map { it.points })
@@ -624,6 +661,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     }
 
     override fun onMarkerTap(m: Marker) {
+        if (m.id.startsWith("tm:")) { timView.rincian(m.id.removePrefix("tm:")); return }
         val ic = MarkerIcons.of(m.icon)
         val l = lastLoc
         val jarak = if (l != null) "\nJarak dari Anda: " + Geo.meter(Geo.dist(TPoint(l.latitude, l.longitude, 0), TPoint(m.lat, m.lon, 0))) else ""
@@ -871,7 +909,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
     // Editor tanda
     // =====================================================================
 
-    private fun editor(existing: Marker?, lat: Double, lon: Double, preset: Marker?, onSaved: (() -> Unit)? = null) {
+    private fun editor(existing: Marker?, lat: Double, lon: Double, preset: Marker?, onSaved: (() -> Unit)? = null, forceTim: Boolean = false) {
         val src = existing ?: preset
         var iconKey = src?.icon ?: "warn"
         val col = LinearLayout(context)
@@ -989,6 +1027,31 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             if (accVal > MarkingText.ACC_OK) setTextColor(0xFFE65100.toInt())
             setPadding(0, dp(10), 0, dp(8))
         })
+
+        // ---- kirim ke tim ----
+        var cbTim: android.widget.CheckBox? = null
+        var etEst: EditText? = null
+        var etAfd: EditText? = null
+        if (existing == null) {
+            val u = Tim.userCache(context)
+            val cb = android.widget.CheckBox(context)
+            cb.text = "Kirim ke Tim (anggota afdeling langsung menerima)"
+            cb.isChecked = forceTim
+            col.addView(cb)
+            val estDef = prefs.getString("tm_est", null) ?: u?.estate?.firstOrNull { !it.equals("SEMUA", true) } ?: ""
+            val afdDef = prefs.getString("tm_afd", null) ?: u?.afdeling?.firstOrNull { !it.equals("SEMUA", true) } ?: ""
+            val (tilE, eE) = inputField(context, "Estate", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, estDef)
+            val (tilA, eA) = inputField(context, "Afdeling", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS, afdDef)
+            val er = LinearLayout(context)
+            er.orientation = HORIZONTAL
+            tilE.layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(6) }
+            tilA.layoutParams = LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            er.addView(tilE); er.addView(tilA)
+            er.visibility = if (cb.isChecked) View.VISIBLE else View.GONE
+            cb.setOnCheckedChangeListener { _, on -> er.visibility = if (on) View.VISIBLE else View.GONE }
+            col.addView(er)
+            cbTim = cb; etEst = eE; etAfd = eA
+        }
         paint()
 
         val sv = ScrollView(context)
@@ -1003,6 +1066,13 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
         dlg.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
             val title = etJ.text.toString().trim()
             if (title.isEmpty()) { tilJ.error = "Judul wajib diisi"; return@setOnClickListener }
+            val kirimTim = cbTim?.isChecked == true
+            val estTim = etEst?.text?.toString()?.trim()?.uppercase() ?: ""
+            val afdTim = etAfd?.text?.toString()?.trim()?.uppercase() ?: ""
+            if (kirimTim) {
+                if (!Tim.aktif(context)) { toast("Isi NPK dan URL Web App di Pengaturan dulu."); return@setOnClickListener }
+                if (estTim.isEmpty() || afdTim.isEmpty()) { toast("Estate dan Afdeling wajib diisi untuk kirim ke Tim."); return@setOnClickListener }
+            }
             val id = existing?.id ?: UUID.randomUUID().toString()
             var m = Marker(
                 id,
@@ -1024,10 +1094,16 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 if (!MarkerStore.photoFile(context, id).exists()) m = m.copy(photo = "")
             }
             MarkerStore.save(context, m)
+            if (kirimTim) {
+                prefs.edit().putString("tm_est", estTim).putString("tm_afd", afdTim).apply()
+                TimView.dariTanda(context, m, estTim, afdTim)
+            }
             dlg.dismiss()
-            toast("Tanda tersimpan")
+            toast(if (kirimTim) "Tersimpan dan dikirim ke Tim" else "Tanda tersimpan")
             reloadOverlays()
             refreshRekap()
+            updateTimTab()
+            if (kirimTim) timView.sinkron(true)
             onSaved?.invoke()
         }
     }

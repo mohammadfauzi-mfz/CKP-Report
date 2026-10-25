@@ -429,6 +429,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         if (hasLocationPermission() && loc.best == null) startGps(false)
         if (ReportStore.pendingCount(this) > 0) Sync.schedule(this)
+        if (::peta.isInitialized) peta.sinkronTim()
     }
 
     private fun updateBadge() {
@@ -1262,6 +1263,17 @@ class MainActivity : AppCompatActivity() {
             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
         f.addView(tPt); f.addView(tUrl); f.addView(tTok); f.addView(tNama)
 
+        f.addView(section("Tim Afdeling"))
+        val (tNpk, eNpk) = field("NPK (nomor induk karyawan)", prefs.getString("npk", "") ?: "",
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
+        f.addView(tNpk)
+        val lblNpk = TextView(this).apply {
+            textSize = 12f; setPadding(0, 0, 0, dp(6))
+            val u = Tim.userCache(this@MainActivity)
+            text = if (u != null) "Masuk sebagai ${u.nama} (${u.peran})" else "NPK harus terdaftar di sheet \"Pengguna\". Dipakai untuk temuan bersama tim."
+        }
+        f.addView(lblNpk)
+
         f.addView(section("Peta Offline (untuk Tracking)"))
         val lblMap = TextView(this).apply { text = mapLabel(); textSize = 13f; setPadding(0, 0, 0, dp(6)) }
         tvMapLabel = lblMap
@@ -1373,7 +1385,24 @@ class MainActivity : AppCompatActivity() {
                 .putString("token", eTok.text.toString().trim())
                 .putString("pelapor", eNama.text.toString().trim())
                 .apply()
+            val npkBaru = eNpk.text.toString().trim().uppercase()
+            val npkLama = prefs.getString("npk", "") ?: ""
+            if (npkBaru != npkLama) Tim.lupaUser(this)
+            prefs.edit().putString("npk", npkBaru).apply()
             d.dismiss()
+            if (npkBaru.isNotEmpty()) {
+                val app = applicationContext
+                Thread {
+                    try {
+                        val u = Tim.verifikasi(app)
+                        runOnUiThread { toast("Tim: masuk sebagai ${u.nama} (${u.peran})"); peta.sinkronTim() }
+                    } catch (e: Tim.Gagal) {
+                        runOnUiThread { toast("NPK: ${e.message}") }
+                    } catch (e: Exception) {
+                        runOnUiThread { toast("NPK belum bisa diverifikasi: ${e.message}") }
+                    }
+                }.start()
+            }
         }
     }
 }
