@@ -220,21 +220,21 @@ class TimView(context: Context, private val env: TimEnv) : LinearLayout(context)
         }
         val app = context.applicationContext
         val local = if (jenis == "p") TemuanStore.fotoP(app, t.id) else TemuanStore.fotoT(app, t.id)
+        var tersedia: File? = null
         Thread {
             val f = if (local.exists()) local else TimSync.unduhFoto(app, t.id, jenis)
             val bmp = f?.let { ImageUtil.thumb(it, 400) }
-            iv.post { if (bmp != null) iv.setImageBitmap(bmp) }
+            iv.post { if (bmp != null) { tersedia = f; iv.setImageBitmap(bmp) } }
         }.start()
         iv.setOnClickListener {
-            val f = if (local.exists()) local else null
+            val f = tersedia
             if (f != null) lihatFoto(f, if (jenis == "p") "Foto perbaikan" else "Foto temuan")
         }
         return iv
     }
 
     private fun lihatFoto(f: File, judul: String) {
-        val iv = ImageView(context).apply { adjustViewBounds = true; setImageBitmap(ImageUtil.thumb(f, 1400)) }
-        MaterialAlertDialogBuilder(context).setTitle(judul).setView(iv).setPositiveButton("Tutup", null).show()
+        FotoViewer.tampil(context, f, judul)
     }
 
     private fun tgl(ms: Long) = MarkingText.tanggal(ms)
@@ -345,7 +345,7 @@ class TimView(context: Context, private val env: TimEnv) : LinearLayout(context)
             adjustViewBounds = true; maxHeight = dp(220); scaleType = ImageView.ScaleType.FIT_CENTER; visibility = View.GONE
         }
         fun ambil(kamera: Boolean) = env.pickPhoto(kamera) { f ->
-            if (f != null) { raw = f; pv.setImageBitmap(ImageUtil.thumb(f, 700)); pv.visibility = View.VISIBLE }
+            if (f != null) { raw = f; pv.setImageBitmap(ImageUtil.thumb(f, 700)); pv.visibility = View.VISIBLE; pv.setOnClickListener { FotoViewer.tampil(context, f, "Foto perbaikan") } }
         }
         val row = LinearLayout(context).apply { orientation = HORIZONTAL }
         row.addView(btn("📷 Kamera") { ambil(true) })

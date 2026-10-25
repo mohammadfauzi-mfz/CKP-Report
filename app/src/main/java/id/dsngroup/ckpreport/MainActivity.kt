@@ -554,6 +554,7 @@ class MainActivity : AppCompatActivity() {
             cell.addView(ImageView(this).apply {
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 setImageBitmap(ImageUtil.thumb(f))
+                setOnClickListener { FotoViewer.tampil(this@MainActivity, f, "Foto") }
             }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             cell.addView(TextView(this).apply {
                 text = "✕"

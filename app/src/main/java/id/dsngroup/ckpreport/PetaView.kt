@@ -676,6 +676,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             iv.scaleType = ImageView.ScaleType.FIT_CENTER
             iv.setPadding(dp(16), dp(8), dp(16), 0)
             iv.setImageBitmap(ImageUtil.thumb(pf, 900))
+            iv.setOnClickListener { FotoViewer.tampil(context, pf, m.title) }
             body.addView(iv)
         }
         val bt = MaterialButton(context)
@@ -1025,6 +1026,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
             } else null
             if (f != null && f.exists()) {
                 pv.setImageBitmap(ImageUtil.thumb(f, 600))
+                pv.setOnClickListener { FotoViewer.tampil(context, f, "Foto") }
                 pv.visibility = View.VISIBLE
                 btnHapusFoto.visibility = View.VISIBLE
             } else {
@@ -1485,6 +1487,7 @@ class PetaView(context: Context, private val host: PetaHost) : LinearLayout(cont
                 setBackgroundColor(0xFFEEEEEE.toInt())
                 layoutParams = LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(140)).apply { bottomMargin = dp(6) }
                 setImageBitmap(ImageUtil.thumb(pf, 640))
+                setOnClickListener { FotoViewer.tampil(context, pf, m.title) }
             })
         }
         val row = LinearLayout(context).apply { orientation = HORIZONTAL }
