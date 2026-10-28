@@ -43,17 +43,17 @@ object DraftStore {
             .put("lux", d.lux).put("track", d.trackId).put("attach", d.attachTrack)
             .put("photos", JSONArray(d.photos))
         if (d.hasCoord) o.put("lat", d.lat).put("lon", d.lon)
-        d.losses?.let { o.put("losses", JSONObject().put("n", it.namaAncak).put("l", it.luas).put("b", it.brondol).put("j", it.janjang).put("bjr", it.bjr)) }
+        d.losses?.let { o.put("losses", JSONObject().put("n", it.namaAncak).put("l", it.luas).put("b", it.brondol).put("j", it.janjang).put("bjr", it.bjr).put("bl", it.blok)) }
         d.grading?.let {
             val g = JSONObject().put("t", it.noTph).put("r", it.ripe).put("m", it.mengkal).put("mt", it.mentah)
                 .put("o", it.overripe).put("bjr", it.bjr).put("b", it.brondol)
-                .put("pn", it.namaPemanen).put("pk", it.kodePemanen)
+                .put("pn", it.namaPemanen).put("pk", it.kodePemanen).put("bl", it.blok)
             if (it.hasCoord) g.put("lat", it.lat).put("lon", it.lon)
             o.put("grading", g)
         }
         d.kalibrasi?.let {
             val k = JSONObject().put("t", it.noTph).put("j", it.janjang).put("k", it.tonaseKg)
-                .put("pn", it.namaPemanen).put("pk", it.kodePemanen)
+                .put("pn", it.namaPemanen).put("pk", it.kodePemanen).put("bl", it.blok)
             if (it.hasCoord) k.put("lat", it.lat).put("lon", it.lon)
             o.put("kal", k)
         }
@@ -67,15 +67,15 @@ object DraftStore {
             est = o.optString("est"), afd = o.optString("afd"), blok = o.optString("blok"),
             problem = o.optString("problem"), perbaikan = o.optString("perbaikan"),
             lat = dbl(o, "lat"), lon = dbl(o, "lon"),
-            losses = o.optJSONObject("losses")?.let { LossesData(it.optString("n"), it.optDouble("l"), it.optDouble("b"), it.optDouble("j"), it.optDouble("bjr")) },
+            losses = o.optJSONObject("losses")?.let { LossesData(it.optString("n"), it.optDouble("l"), it.optDouble("b"), it.optDouble("j"), it.optDouble("bjr"), it.optString("bl")) },
             grading = o.optJSONObject("grading")?.let {
                 GradingData(it.optString("t"), it.optDouble("r"), it.optDouble("m"), it.optDouble("mt"), it.optDouble("o"),
                     it.optDouble("bjr"), it.optDouble("b"), dbl(it, "lat"), dbl(it, "lon"),
-                    it.optString("pn"), it.optString("pk"))
+                    it.optString("pn"), it.optString("pk"), it.optString("bl"))
             },
             kalibrasi = o.optJSONObject("kal")?.let {
                 KalibrasiData(it.optString("t"), it.optDouble("j"), it.optDouble("k"), dbl(it, "lat"), dbl(it, "lon"),
-                    it.optString("pn"), it.optString("pk"))
+                    it.optString("pn"), it.optString("pk"), it.optString("bl"))
             },
             lux = o.optDouble("lux", -1.0),
             trackId = o.optString("track"), attachTrack = o.optBoolean("attach"),

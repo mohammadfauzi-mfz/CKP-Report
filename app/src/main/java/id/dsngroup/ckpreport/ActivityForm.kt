@@ -17,7 +17,7 @@ import com.google.android.material.checkbox.MaterialCheckBox
 import com.google.android.material.textfield.TextInputEditText
 
 /** Checklist Activity (Losses / Grading TPH / Kalibrasi BJR). Rincian muncul hanya jika dicentang. */
-class ActivityForm(context: Context, private val locProvider: () -> Location?) : LinearLayout(context) {
+class ActivityForm(context: Context, private val locProvider: () -> Location?, private val blokProvider: () -> String = { "" }) : LinearLayout(context) {
 
     /** Koordinat khusus untuk satu activity (Grading TPH / Kalibrasi BJR): diambil dari GPS saat tombol ditekan. */
     private inner class Coord(panel: LinearLayout) {
@@ -92,6 +92,11 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
     private val pGrading = panel()
     private val pKal = panel()
 
+    // Blok per activity (default mengikuti isian Blok di atas, boleh diganti)
+    private lateinit var etBlokL: TextInputEditText
+    private lateinit var etBlokG: TextInputEditText
+    private lateinit var etBlokK: TextInputEditText
+
     // Losses
     private lateinit var etAncak: TextInputEditText
     private lateinit var etLuas: TextInputEditText
@@ -136,9 +141,9 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
             setTypeface(null, Typeface.BOLD)
             setPadding(0, dp(16), 0, dp(4))
         })
-        link(cbLosses, "Losses", pLosses)
-        link(cbGrading, "Grading TPH", pGrading) { if (it && !coordG.has) coordG.capture(false) }
-        link(cbKal, "Kalibrasi BJR", pKal) { if (it && !coordK.has) coordK.capture(false) }
+        link(cbLosses, "Losses", pLosses) { if (it) isiBlok(etBlokL) }
+        link(cbGrading, "Grading TPH", pGrading) { if (it) isiBlok(etBlokG); if (it && !coordG.has) coordG.capture(false) }
+        link(cbKal, "Kalibrasi BJR", pKal) { if (it) isiBlok(etBlokK); if (it && !coordK.has) coordK.capture(false) }
         addView(cbLosses); addView(pLosses)
         addView(cbGrading); addView(pGrading)
         addView(cbKal); addView(pKal)
@@ -146,6 +151,17 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
         buildGrading()
         buildKalibrasi()
         recalc()
+    }
+
+    /** Isi Blok activity dari isian Blok utama bila masih kosong. */
+    private fun isiBlok(e: TextInputEditText) {
+        if (e.text.toString().isBlank()) e.setText(blokProvider().trim().uppercase())
+    }
+
+    private fun blokField(p: LinearLayout): TextInputEditText {
+        val (t, e) = inputField(context, "Blok", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
+        p.addView(t)
+        return e
     }
 
     private fun panel() = LinearLayout(context).apply {
@@ -192,6 +208,7 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     private fun buildLosses() {
         title(pLosses, "Losses :")
+        etBlokL = blokField(pLosses)
         val (t, e) = inputField(context, "Nama Ancak", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS)
         etAncak = e
         pLosses.addView(t)
@@ -226,6 +243,7 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     private fun buildGrading() {
         title(pGrading, "Grading TPH :")
+        etBlokG = blokField(pGrading)
         val (t, e) = inputField(context, "No TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphG = e
         pGrading.addView(t)
@@ -248,6 +266,7 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     private fun buildKalibrasi() {
         title(pKal, "Kalibrasi BJR :")
+        etBlokK = blokField(pKal)
         val (t, e) = inputField(context, "No. TPH", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS)
         etTphK = e
         pKal.addView(t)
@@ -288,20 +307,23 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     fun losses(force: Boolean = false): LossesData? =
         if (!force && !cbLosses.isChecked) null
-        else LossesData(etAncak.text.toString().trim(), etLuas.num(), etBrondol.num(), etJanjang.num(), etBjr.num())
+        else LossesData(etAncak.text.toString().trim(), etLuas.num(), etBrondol.num(), etJanjang.num(), etBjr.num(), blokDari(etBlokL))
+
+    private fun blokDari(e: TextInputEditText): String =
+        e.text.toString().trim().uppercase().ifEmpty { blokProvider().trim().uppercase() }
 
     fun grading(force: Boolean = false): GradingData? =
         if (!force && !cbGrading.isChecked) null
         else GradingData(
             etTphG.text.toString().trim(), etRipe.num(), etMengkal.num(), etMentah.num(), etOverripe.num(),
             etBjrG.num(), etBrondolG.num(), coordG.lat, coordG.lon,
-            etNamaG.text.toString().trim(), etKodeG.text.toString().trim(),
+            etNamaG.text.toString().trim(), etKodeG.text.toString().trim(), blokDari(etBlokG),
         )
 
     fun kalibrasi(force: Boolean = false): KalibrasiData? =
         if (!force && !cbKal.isChecked) null
         else KalibrasiData(etTphK.text.toString().trim(), etJjgK.num(), etTonK.num(), coordK.lat, coordK.lon,
-            etNamaK.text.toString().trim(), etKodeK.text.toString().trim())
+            etNamaK.text.toString().trim(), etKodeK.text.toString().trim(), blokDari(etBlokK))
 
     /** @return pesan kesalahan, atau null jika isian activity sudah lengkap. */
     fun validate(): String? {
@@ -325,19 +347,19 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
     fun load(l: LossesData?, g: GradingData?, k: KalibrasiData?) {
         reset()
         if (l != null) {
-            etAncak.setText(l.namaAncak)
+            etAncak.setText(l.namaAncak); etBlokL.setText(l.blok)
             etLuas.setText(s(l.luas)); etBrondol.setText(s(l.brondol)); etJanjang.setText(s(l.janjang)); etBjr.setText(s(l.bjr))
             cbLosses.isChecked = true
         }
         if (g != null) {
-            etTphG.setText(g.noTph); etNamaG.setText(g.namaPemanen); etKodeG.setText(g.kodePemanen)
+            etBlokG.setText(g.blok); etTphG.setText(g.noTph); etNamaG.setText(g.namaPemanen); etKodeG.setText(g.kodePemanen)
             etRipe.setText(s(g.ripe)); etMengkal.setText(s(g.mengkal)); etMentah.setText(s(g.mentah)); etOverripe.setText(s(g.overripe))
             etBjrG.setText(s(g.bjr)); etBrondolG.setText(s(g.brondol))
             if (g.hasCoord) coordG.set(g.lat, g.lon)
             cbGrading.isChecked = true
         }
         if (k != null) {
-            etTphK.setText(k.noTph); etNamaK.setText(k.namaPemanen); etKodeK.setText(k.kodePemanen)
+            etBlokK.setText(k.blok); etTphK.setText(k.noTph); etNamaK.setText(k.namaPemanen); etKodeK.setText(k.kodePemanen)
             etJjgK.setText(s(k.janjang)); etTonK.setText(s(k.tonaseKg))
             if (k.hasCoord) coordK.set(k.lat, k.lon)
             cbKal.isChecked = true
@@ -347,7 +369,7 @@ class ActivityForm(context: Context, private val locProvider: () -> Location?) :
 
     fun reset() {
         listOf(etAncak, etLuas, etBrondol, etJanjang, etBjr, etTphG, etRipe, etMengkal, etMentah, etOverripe,
-            etBjrG, etBrondolG, etTphK, etJjgK, etTonK, etNamaG, etKodeG, etNamaK, etKodeK).forEach { it.setText("") }
+            etBjrG, etBrondolG, etTphK, etJjgK, etTonK, etNamaG, etKodeG, etNamaK, etKodeK, etBlokL, etBlokG, etBlokK).forEach { it.setText("") }
         coordG.clear()
         coordK.clear()
         cbLosses.isChecked = false

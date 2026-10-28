@@ -245,7 +245,7 @@ class MainActivity : AppCompatActivity() {
         box.addView(trackBox)
 
         // Activity (Losses / Grading TPH / Kalibrasi BJR)
-        activities = ActivityForm(this) { loc.best }
+        activities = ActivityForm(this, { loc.best }, { etBlok.text.toString().trim() })
         box.addView(activities)
 
         // Problem

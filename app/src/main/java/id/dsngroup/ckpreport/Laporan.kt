@@ -51,6 +51,7 @@ object Laporan {
 
         r.losses?.let { l ->
             sb.append("\n*Losses*\n")
+            sb.append("Blok : ${l.blok.ifBlank { r.blok }}\n")
             sb.append("Nama Ancak : ${l.namaAncak}\n")
             sb.append("Luas CKP : ${angka(l.luas)} Ha\n")
             sb.append("Brondol Tinggal : ${angka(l.brondol)} Kg\n")
@@ -62,6 +63,7 @@ object Laporan {
         }
         r.grading?.let { g ->
             sb.append("\n*Grading TPH*\n")
+            sb.append("Blok : ${g.blok.ifBlank { r.blok }}\n")
             sb.append("No TPH : ${g.noTph}\n")
             if (g.namaPemanen.isNotBlank()) sb.append("Nama Pemanen : ${g.namaPemanen}\n")
             if (g.kodePemanen.isNotBlank()) sb.append("Kode Pemanen : ${g.kodePemanen}\n")
@@ -77,6 +79,7 @@ object Laporan {
         }
         r.kalibrasi?.let { k ->
             sb.append("\n*Kalibrasi BJR*\n")
+            sb.append("Blok : ${k.blok.ifBlank { r.blok }}\n")
             sb.append("No. TPH : ${k.noTph}\n")
             if (k.namaPemanen.isNotBlank()) sb.append("Nama Pemanen : ${k.namaPemanen}\n")
             if (k.kodePemanen.isNotBlank()) sb.append("Kode Pemanen : ${k.kodePemanen}\n")

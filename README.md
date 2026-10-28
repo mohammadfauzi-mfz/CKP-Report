@@ -12,6 +12,10 @@ Share satu tanda (ketuk tanda di peta > Share): WhatsApp (teks + foto), JSON (bi
 ## v2.6
 File JSON/KML/KMZ/GPX/GeoJSON/CSV/zip (backup, paket peta, shapefile) dan GeoPDF bisa dibuka atau dibagikan langsung ke CKP Report dari WhatsApp / File Manager (Buka dengan > CKP Report).
 
+## v2.9.2
+- Tab Laporan: tiap activity (Losses, Grading TPH, Kalibrasi BJR) punya kolom **Blok** sendiri (otomatis terisi dari Blok utama, boleh diganti). Ikut ke pesan WhatsApp dan ke spreadsheet (3 kolom baru di ujung kanan: "Losses: Blok", "Grading: Blok", "Kalibrasi: Blok"). Sheet CKP lama tidak diganti; judul kolom baru ditambahkan otomatis. Tempel ulang `Code.gs` dan Deploy versi baru.
+- Perbaikan crash saat Share WA temuan tim (FileProvider belum mencakup folder foto tim).
+
 ## v2.8 - Sinkronisasi Tim
 
 Temuan bersama satu afdeling: siapa pun bisa menandai temuan, anggota lain langsung menerimanya, dan melapor perbaikan (foto wajib) sampai TUNTAS.

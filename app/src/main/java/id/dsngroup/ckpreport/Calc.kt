@@ -9,6 +9,7 @@ data class LossesData(
     val brondol: Double,   // Brondol Tinggal (Kg)
     val janjang: Double,   // Janjang Tinggal (JJG)
     val bjr: Double,       // BJR (Kg)
+    val blok: String = "", // blok khusus activity ini
 ) {
     val lossesJjg: Double get() = bjr * janjang                      // =D10*D9
     val total: Double get() = brondol + lossesJjg                    // =SUM(D8,D11)
@@ -33,6 +34,7 @@ data class GradingData(
     val lon: Double = Double.NaN,
     val namaPemanen: String = "",
     val kodePemanen: String = "",
+    val blok: String = "",
 ) {
     val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
     val dinilai: Boolean get() = tonase > 0.0
@@ -55,6 +57,7 @@ data class KalibrasiData(
     val lon: Double = Double.NaN,
     val namaPemanen: String = "",
     val kodePemanen: String = "",
+    val blok: String = "",
 ) {
     val hasCoord: Boolean get() = !lat.isNaN() && !lon.isNaN()
     val bjr: Double get() = if (janjang > 0.0) tonaseKg / janjang else 0.0 // =D30/D29

@@ -22,10 +22,11 @@ const HEADERS = [
   'Grading: Total JJG', 'Grading: BJR (Kg)', 'Grading: Tonase (Ton)', 'Grading: Brondol (Kg)', 'Grading: Brondol (%)', 'Grading: Koordinat',
   'Kalibrasi: No TPH', 'Kalibrasi: Nama Pemanen', 'Kalibrasi: Kode Pemanen', 'Kalibrasi: Jumlah Janjang (JJG)', 'Kalibrasi: Tonase (Kg)', 'Kalibrasi: BJR (Kg)', 'Kalibrasi: Koordinat',
   'Problem / Temuan', 'Perbaikan', 'Cahaya (Lux)', 'Latitude', 'Longitude', 'Koordinat (salin)', 'Link Google Maps',
-  'Link Foto', 'Pelapor', 'ID Laporan'
+  'Link Foto', 'Pelapor', 'ID Laporan',
+  'Losses: Blok', 'Grading: Blok', 'Kalibrasi: Blok'   // ditambahkan di ujung agar sheet lama tidak perlu dibuat ulang
 ];
 const COL_FOTO = HEADERS.indexOf('Link Foto') + 1;
-const COL_ID = HEADERS.length;
+const COL_ID = HEADERS.indexOf('ID Laporan') + 1;
 const PERCENT_COLS = ['Grading: Ripe (%)', 'Grading: Mengkal (%)', 'Grading: Mentah (%)',
                       'Grading: Overripe (%)', 'Grading: Brondol (%)'].map(function (h) { return HEADERS.indexOf(h) + 1; });
 
@@ -103,9 +104,19 @@ function foto_(p) {
 function prepareSheet_(ss) {
   let sh = ss.getSheetByName(SHEET_NAME);
   // Sheet versi lama (kolom berbeda): ganti namanya agar data lama aman, lalu buat sheet baru
-  if (sh && sh.getLastRow() > 0 && sh.getRange(1, 1, 1, HEADERS.length).getValues()[0].join('|') !== HEADERS.join('|')) {
-    sh.setName(SHEET_NAME + ' (lama ' + Utilities.formatDate(new Date(), 'Asia/Makassar', 'yyyyMMdd-HHmmss') + ')');
-    sh = null;
+  // Sheet lama yang judul kolomnya hanya kurang di ujung: cukup ditambah judul barunya (data tetap di sheet yang sama).
+  if (sh && sh.getLastRow() > 0) {
+    const cur = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0].map(String);
+    while (cur.length && cur[cur.length - 1] === '') cur.pop();
+    const awal = cur.length <= HEADERS.length && HEADERS.slice(0, cur.length).join('|') === cur.join('|');
+    if (awal) {
+      if (cur.length < HEADERS.length) {
+        sh.getRange(1, cur.length + 1, 1, HEADERS.length - cur.length).setValues([HEADERS.slice(cur.length)]).setFontWeight('bold');
+      }
+    } else {
+      sh.setName(SHEET_NAME + ' (lama ' + Utilities.formatDate(new Date(), 'Asia/Makassar', 'yyyyMMdd-HHmmss') + ')');
+      sh = null;
+    }
   }
   if (!sh) sh = ss.insertSheet(SHEET_NAME);
   if (sh.getLastRow() === 0) {
@@ -184,7 +195,8 @@ function doPost(e) {
       num_(G.mentah), num_(G.pMentah), num_(G.overripe), num_(G.pOverripe),
       num_(G.total), num_(G.bjr), num_(G.tonase), num_(G.brondol), num_(G.pBrondol), salin_(G.lat, G.lon),
       K.noTph || '', K.namaPemanen || '', K.kodePemanen || '', num_(K.janjang), num_(K.tonaseKg), num_(K.bjr), salin_(K.lat, K.lon),
-      d.problem, d.perbaikan || '', num_(d.lux), lat, lon, salin, d.mapsUrl, fotoUrl, d.pelapor || '', d.id || ''
+      d.problem, d.perbaikan || '', num_(d.lux), lat, lon, salin, d.mapsUrl, fotoUrl, d.pelapor || '', d.id || '',
+      L.blok || '', G.blok || '', K.blok || ''
     ]);
     const row = sh.getLastRow();
     PERCENT_COLS.forEach(function (c) { sh.getRange(row, c).setNumberFormat('0.00%'); });
